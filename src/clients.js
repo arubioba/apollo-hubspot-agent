@@ -28,21 +28,25 @@ function hubspot(path, options = {}) {
 }
 
 export async function findApolloCandidates(filters, page = 1) {
-  const payload = {
-    page,
-    per_page: 100,
-    organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
-    organization_locations: filters.countries,
-    q_organization_keyword_tags: filters.interpretation.industryKeywords,
-    person_titles: filters.interpretation.roleTitles,
-    person_seniorities: filters.interpretation.seniorities,
-    person_locations: filters.interpretation.contactLocations,
-    q_keywords: filters.interpretation.companyKeywords.join(" "),
-    include_similar_titles: true,
-    contact_email_status: ["verified"]
-  };
-  const data = await apollo("/contacts/search", payload);
-  return (data.people || data.contacts || []).map(normalizeCandidate)
+  const results = [];
+  for (const industry of filters.interpretation.industryKeywords) {
+    const payload = {
+      page,
+      per_page: 100,
+      organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
+      organization_locations: filters.countries,
+      q_organization_keyword_tags: [industry],
+      person_titles: filters.interpretation.roleTitles,
+      person_seniorities: filters.interpretation.seniorities,
+      person_locations: filters.interpretation.contactLocations,
+      q_keywords: filters.interpretation.companyKeywords.join(" "),
+      include_similar_titles: true,
+      contact_email_status: ["verified"]
+    };
+    const data = await apollo("/contacts/search", payload);
+    results.push(...(data.people || data.contacts || []));
+  }
+  return [...new Map(results.map(person => [person.id, person])).values()].map(normalizeCandidate)
     .filter(c => c.emailVerified && c.company.domain && c.validPhones.some(isMappableContactPhone))
     .filter(c => !matchesExcludedTitle(c.title, filters.interpretation.excludedTitles));
 }

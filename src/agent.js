@@ -42,11 +42,25 @@ export async function analyzeFilters(id, filters) {
     employeeRange: [filters.employeeMin, filters.employeeMax],
     adHocBrief: filters.adHocBrief
   });
+  interpretation.relaxation = buildSafeRelaxation(interpretation);
   run.filters = { ...filters, interpretation };
   run.roles = filters.roles;
   run.phase = "interpretation_pending";
   await saveRun(run);
   return { run, interpretation, message: "Revisa y aprueba cómo interpretaré tus filtros en Apollo." };
+}
+
+function buildSafeRelaxation(interpretation) {
+  const removeCompanyKeywords = interpretation.companyKeywords.length > 0;
+  const removeContactLocations = interpretation.contactLocations.length > 0;
+  return {
+    removeCompanyKeywords,
+    removeContactLocations,
+    broadenEmployeeRangeByPercent: removeCompanyKeywords || removeContactLocations ? 0 : 20,
+    explanation: removeCompanyKeywords || removeContactLocations
+      ? "Retirar primero palabras clave y ubicaciones opcionales interpretadas del brief, manteniendo industria, países, roles, email verificado, teléfono válido, dominio y rango de empleados."
+      : "Ampliar 20% el rango de empleados, manteniendo industria, países, roles, email verificado, teléfono válido y dominio."
+  };
 }
 
 export async function approveRoles(id) {
