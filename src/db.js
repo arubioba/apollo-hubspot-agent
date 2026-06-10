@@ -54,10 +54,18 @@ export async function incrementDailyCount(amount, client = pool) {
 export async function saveRun(run) {
   await pool.query(`
     INSERT INTO import_runs(id, phase, filters, roles, candidates, test_results, final_results)
-    VALUES($1,$2,$3,$4,$5,$6,$7)
-    ON CONFLICT(id) DO UPDATE SET phase=$2, filters=$3, roles=$4, candidates=$5,
-      test_results=$6, final_results=$7, updated_at=now()
-  `, [run.id, run.phase, run.filters, run.roles, run.candidates, run.testResults, run.finalResults]);
+    VALUES($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb)
+    ON CONFLICT(id) DO UPDATE SET phase=$2, filters=$3::jsonb, roles=$4::jsonb, candidates=$5::jsonb,
+      test_results=$6::jsonb, final_results=$7::jsonb, updated_at=now()
+  `, [
+    run.id,
+    run.phase,
+    JSON.stringify(run.filters),
+    JSON.stringify(run.roles),
+    JSON.stringify(run.candidates),
+    JSON.stringify(run.testResults),
+    JSON.stringify(run.finalResults)
+  ]);
 }
 
 export async function loadRun(id) {
