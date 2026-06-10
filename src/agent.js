@@ -1,0 +1,130 @@
+import crypto from "node:crypto";
+import { config } from "./config.js";
+import { findApolloCandidates, importCandidate, listApolloLists } from "./clients.js";
+import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db.js";
+
+const ICP_ROLES = [
+  "CIO", "CTO", "Director de Tecnología", "Chief Marketing Officer", "CMO",
+  "Director de Marketing", "Sales Director", "Director Comercial",
+  "Director de Ventas", "CEO", "Director General"
+];
+
+export async function startRun() {
+  const run = {
+    id: crypto.randomUUID(), phase: "collecting", filters: {}, roles: ICP_ROLES,
+    candidates: [], testResults: {}, finalResults: {}
+  };
+  await saveRun(run);
+  let lists = [];
+  try { lists = await listApolloLists(); } catch {}
+  return {
+    run,
+    message: "Selecciona una lista de Apollo y define dos industrias, rango de empleados, países y cantidad objetivo.",
+    lists,
+    suggestedRoles: ICP_ROLES
+  };
+}
+
+export async function configureRun(id, filters) {
+  const run = await requiredRun(id);
+  validateFilters(filters);
+  run.filters = filters;
+  run.roles = filters.roles;
+  run.phase = "roles_pending";
+  await saveRun(run);
+  return { run, message: "Valida los roles ICP sugeridos antes de buscar candidatos." };
+}
+
+export async function approveRoles(id) {
+  const run = await requiredRun(id);
+  const candidates = [];
+  for (let page = 1; page <= 5 && candidates.length < run.filters.quantity + config.testBatchSize; page++) {
+    candidates.push(...await findApolloCandidates(run.filters, page));
+  }
+  run.candidates = uniqueByEmail(candidates).slice(0, run.filters.quantity + config.testBatchSize);
+  run.phase = "test_ready";
+  await saveRun(run);
+  return {
+    run,
+    message: `Encontré ${run.candidates.length} candidatos elegibles. La prueba usará los primeros ${Math.min(config.testBatchSize, run.candidates.length)}.`
+  };
+}
+
+export async function executeTest(id) {
+  const run = await requiredRun(id);
+  const batch = run.candidates.slice(0, config.testBatchSize);
+  run.testResults = await executeBatch(batch, false);
+  run.phase = "test_review";
+  await saveRun(run);
+  return { run, message: "Prueba terminada. Verifica los contactos en HubSpot antes de continuar." };
+}
+
+export async function executeFinal(id, approvalCode) {
+  const run = await requiredRun(id);
+  const requested = run.filters.quantity;
+  const dailyCount = await getDailyCount();
+  const remaining = Math.max(0, config.dailyLimit - dailyCount);
+  const requiresCode = requested > remaining;
+  if (requiresCode && approvalCode !== config.approvalCode) {
+    return {
+      run, requiresApprovalCode: true,
+      message: `La operación supera el límite diario disponible de ${remaining}. Ingresa el código de aprobación.`
+    };
+  }
+  const batch = run.candidates.slice(config.testBatchSize, config.testBatchSize + requested);
+  run.finalResults = await executeBatch(batch, true);
+  run.phase = "complete";
+  await saveRun(run);
+  const missing = requested - run.finalResults.successful.length;
+  return {
+    run, missing,
+    message: missing > 0
+      ? `Se integraron ${run.finalResults.successful.length}. Fallaron o faltaron ${missing}. Puedes solicitar completar los faltantes.`
+      : `Se integraron correctamente los ${requested} contactos solicitados.`
+  };
+}
+
+async function executeBatch(batch, countAgainstLimit) {
+  const successful = [];
+  const failed = [];
+  for (const candidate of batch) {
+    try {
+      successful.push(await importCandidate(candidate));
+    } catch (error) {
+      failed.push({ email: candidate.email, error: error.message });
+    }
+  }
+  if (countAgainstLimit && successful.length) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await incrementDailyCount(successful.length, client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  return { successful, failed };
+}
+
+function uniqueByEmail(items) {
+  return [...new Map(items.filter(x => x.email).map(x => [x.email.toLowerCase(), x])).values()];
+}
+
+function validateFilters(filters) {
+  if (!filters.listId) throw new Error("Selecciona una lista de Apollo.");
+  if (!Array.isArray(filters.industries) || filters.industries.length !== 2) throw new Error("Selecciona exactamente dos industrias.");
+  if (!filters.employeeMin || !filters.employeeMax || filters.employeeMin > filters.employeeMax) throw new Error("Define un rango válido de empleados.");
+  if (!Array.isArray(filters.countries) || !filters.countries.length) throw new Error("Selecciona al menos un país.");
+  if (!Array.isArray(filters.roles) || !filters.roles.length) throw new Error("Valida al menos un rol ICP.");
+  if (!Number.isInteger(filters.quantity) || filters.quantity < 1) throw new Error("La cantidad debe ser mayor que cero.");
+}
+
+async function requiredRun(id) {
+  const run = await loadRun(id);
+  if (!run) throw new Error("Proceso no encontrado.");
+  return run;
+}

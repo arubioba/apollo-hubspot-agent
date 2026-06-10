@@ -1,0 +1,161 @@
+import { config } from "./config.js";
+
+async function request(url, options = {}) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) throw new Error(`${response.status} ${body.message || body.error || text}`);
+  return body;
+}
+
+function apollo(path, body, method = "POST") {
+  return request(`${config.apolloBase}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", "X-Api-Key": config.apolloKey },
+    body: method === "GET" ? undefined : JSON.stringify(body)
+  });
+}
+
+function hubspot(path, options = {}) {
+  return request(`${config.hubspotBase}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.hubspotToken}`,
+      ...options.headers
+    }
+  });
+}
+
+export async function listApolloLists() {
+  const data = await apollo("/labels", {}, "GET");
+  return (data.labels || []).filter(x => x.modality === "contact" || !x.modality)
+    .map(x => ({ id: x.id, name: x.name }));
+}
+
+export async function findApolloCandidates(filters, page = 1) {
+  const payload = {
+    page,
+    per_page: 100,
+    contact_label_ids: [filters.listId],
+    organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
+    organization_locations: filters.countries,
+    q_organization_keyword_tags: filters.industries,
+    person_titles: filters.roles,
+    contact_email_status: ["verified"]
+  };
+  const data = await apollo("/contacts/search", payload);
+  return (data.people || data.contacts || []).map(normalizeCandidate)
+    .filter(c => c.emailVerified && c.validPhones.some(isMappableContactPhone));
+}
+
+export function normalizeCandidate(person) {
+  const organization = person.organization || person.account || {};
+  const phones = person.phone_numbers || [];
+  return {
+    apolloId: person.id,
+    firstName: person.first_name || "",
+    lastName: person.last_name || "",
+    email: person.email,
+    emailVerified: ["verified", "likely to engage"].includes((person.email_status || "").toLowerCase()),
+    title: person.title || "",
+    linkedin: person.linkedin_url || "",
+    city: person.city || "",
+    state: person.state || "",
+    country: person.country || "",
+    validPhones: phones.filter(p => p.status === "valid_number" || p.sanitized_number),
+    company: {
+      name: organization.name || person.organization_name || "",
+      domain: organization.primary_domain || organization.domain || "",
+      website: organization.website_url || "",
+      phone: organization.sanitized_phone || organization.phone || "",
+      city: organization.city || "",
+      state: organization.state || "",
+      country: organization.country || "",
+      zip: organization.postal_code || "",
+      linkedin: organization.linkedin_url || "",
+      employees: organization.estimated_num_employees || organization.num_employees || null
+    }
+  };
+}
+
+function isMappableContactPhone(phone) {
+  return ["mobile", "direct", "direct_dial", "work_direct"].includes(phone.type)
+    && Boolean(phone.sanitized_number);
+}
+
+export function contactProperties(candidate) {
+  const mobile = candidate.validPhones.find(p => p.type === "mobile" && p.sanitized_number);
+  const direct = candidate.validPhones.find(p =>
+    ["direct", "direct_dial", "work_direct"].includes(p.type) && p.sanitized_number
+  );
+  return compact({
+    firstname: candidate.firstName, lastname: candidate.lastName, email: candidate.email,
+    jobtitle: candidate.title, company: candidate.company.name, hs_linkedin_url: candidate.linkedin,
+    city: candidate.city, state: candidate.state, country: candidate.country,
+    phone: direct?.sanitized_number, hs_whatsapp_phone_number: mobile?.sanitized_number
+  });
+}
+
+function companyProperties(company) {
+  return compact({
+    name: company.name, domain: company.domain, website: company.website, phone: company.phone,
+    city: company.city, state: company.state, country: company.country, zip: company.zip,
+    linkedin_company_page: company.linkedin,
+    numberofemployees: company.employees ? String(company.employees) : undefined
+  });
+}
+
+function compact(object) {
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined && value !== ""));
+}
+
+async function searchOne(objectType, propertyName, value, properties) {
+  const body = {
+    filterGroups: [{ filters: [{ propertyName, operator: "EQ", value }] }],
+    properties, limit: 1
+  };
+  const data = await hubspot(`/crm/v3/objects/${objectType}/search`, {
+    method: "POST", body: JSON.stringify(body)
+  });
+  return data.results?.[0] || null;
+}
+
+async function createObject(objectType, properties) {
+  return hubspot(`/crm/v3/objects/${objectType}`, {
+    method: "POST", body: JSON.stringify({ properties })
+  });
+}
+
+async function fillBlankProperties(objectType, id, incoming) {
+  const current = await hubspot(`/crm/v3/objects/${objectType}/${id}?properties=${Object.keys(incoming).join(",")}`);
+  const updates = Object.fromEntries(Object.entries(incoming).filter(([key]) => !current.properties?.[key]));
+  if (!Object.keys(updates).length) return current;
+  return hubspot(`/crm/v3/objects/${objectType}/${id}`, {
+    method: "PATCH", body: JSON.stringify({ properties: updates })
+  });
+}
+
+async function associate(contactId, companyId) {
+  return hubspot(`/crm/v4/objects/contacts/${contactId}/associations/default/companies/${companyId}`, {
+    method: "PUT"
+  });
+}
+
+export async function importCandidate(candidate) {
+  if (!candidate.email || !candidate.company.domain) {
+    throw new Error("Missing verified email or company domain");
+  }
+  let company = await searchOne("companies", "domain", candidate.company.domain, ["domain", "name"]);
+  company = company
+    ? await fillBlankProperties("companies", company.id, companyProperties(candidate.company))
+    : await createObject("companies", companyProperties(candidate.company));
+
+  let contact = await searchOne("contacts", "email", candidate.email, ["email", "firstname", "lastname"]);
+  contact = contact
+    ? await fillBlankProperties("contacts", contact.id, contactProperties(candidate))
+    : await createObject("contacts", contactProperties(candidate));
+
+  await associate(contact.id, company.id);
+  return { contactId: contact.id, companyId: company.id, email: candidate.email };
+}

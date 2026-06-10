@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Freelan Apollo → HubSpot Agent</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <header><strong>Freelan Revenue Agent</strong><span>Apollo → HubSpot</span></header>
+    <section id="chat"></section>
+    <form id="filters" hidden>
+      <label>Lista de Apollo <select id="list"></select></label>
+      <label>Industria 1 <input id="industry1" required></label>
+      <label>Industria 2 <input id="industry2" required></label>
+      <div class="row">
+        <label>Empleados mínimo <input id="min" type="number" value="50" required></label>
+        <label>Empleados máximo <input id="max" type="number" value="5000" required></label>
+      </div>
+      <label>Países <input id="countries" value="Mexico, Colombia" required></label>
+      <label>Contactos a importar después de la prueba <input id="quantity" type="number" value="50" min="1" required></label>
+      <fieldset><legend>Roles ICP sugeridos</legend><div id="roles"></div></fieldset>
+      <button>Validar filtros y roles</button>
+    </form>
+    <div id="actions"></div>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
