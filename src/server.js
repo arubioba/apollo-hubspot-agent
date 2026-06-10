@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { config, getMissingConfig } from "./config.js";
 import { analyzeFilters, applyRelaxation, approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
 import { verifyHubSpotConnection } from "./clients.js";
+import { verifyOpenAIConnection } from "./interpreter.js";
 import { initDb } from "./db.js";
 
 const app = express();
@@ -31,6 +32,7 @@ app.get("/health", (_, res) => res.json({
   missingConfig: getMissingConfig()
 }));
 app.get("/api/diagnostics/hubspot", route(() => verifyHubSpotConnection()));
+app.get("/api/diagnostics/openai", route(() => verifyOpenAIConnection()));
 app.post("/api/runs", route(() => startRun()));
 app.post("/api/runs/:id/configure", route(req => configureRun(req.params.id, req.body)));
 app.post("/api/runs/:id/analyze", route(req => analyzeFilters(req.params.id, req.body)));

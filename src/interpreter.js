@@ -53,3 +53,16 @@ export async function interpretFilters(input) {
   if (!text) throw new Error("OpenAI did not return a filter interpretation.");
   return JSON.parse(text);
 }
+
+export async function verifyOpenAIConnection() {
+  try {
+    const response = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${config.openaiKey}` }
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(`${response.status}: ${body.error?.message || "authentication failed"}`);
+    return { ok: true, model: config.openaiModel };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
