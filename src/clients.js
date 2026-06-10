@@ -159,3 +159,16 @@ export async function importCandidate(candidate) {
   await associate(contact.id, company.id);
   return { contactId: contact.id, companyId: company.id, email: candidate.email };
 }
+
+export async function verifyHubSpotConnection() {
+  try {
+    await hubspot("/crm/v3/objects/contacts?limit=1");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message,
+      hint: "Use a HubSpot Private App access token beginning with pat- and grant contacts/companies read and write scopes."
+    };
+  }
+}

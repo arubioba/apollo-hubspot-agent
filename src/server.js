@@ -2,6 +2,7 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { config, getMissingConfig } from "./config.js";
 import { approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
+import { verifyHubSpotConnection } from "./clients.js";
 import { initDb } from "./db.js";
 
 const app = express();
@@ -29,6 +30,7 @@ app.get("/health", (_, res) => res.json({
   configuration: getMissingConfig().length ? "incomplete" : "ready",
   missingConfig: getMissingConfig()
 }));
+app.get("/api/diagnostics/hubspot", route(() => verifyHubSpotConnection()));
 app.post("/api/runs", route(() => startRun()));
 app.post("/api/runs/:id/configure", route(req => configureRun(req.params.id, req.body)));
 app.post("/api/runs/:id/approve-roles", route(req => approveRoles(req.params.id)));
