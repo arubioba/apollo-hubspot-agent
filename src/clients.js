@@ -46,7 +46,7 @@ export async function findApolloCandidates(filters, page = 1) {
   };
   const data = await apollo("/contacts/search", payload);
   return (data.people || data.contacts || []).map(normalizeCandidate)
-    .filter(c => c.emailVerified && c.validPhones.some(isMappableContactPhone));
+    .filter(c => c.emailVerified && c.company.domain && c.validPhones.some(isMappableContactPhone));
 }
 
 export function normalizeCandidate(person) {

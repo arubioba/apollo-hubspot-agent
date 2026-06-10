@@ -19,6 +19,7 @@ async function boot() {
   run = data.run; say(data.message);
   document.querySelector("#apollo-lists").innerHTML = data.lists
     .map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
+  if (data.lists.length) document.querySelector("#list").value = data.lists[0].id;
   if (data.listError) say(`Apollo no pudo listar las listas automáticamente. Pega el ID de la lista manualmente. Detalle: ${data.listError}`);
   else if (!data.lists.length) say("Apollo no devolvió listas disponibles. Pega el ID de la lista manualmente.");
   document.querySelector("#roles").innerHTML = data.suggestedRoles.map((x,i) =>

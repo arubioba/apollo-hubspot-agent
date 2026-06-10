@@ -8,6 +8,9 @@ const ICP_ROLES = [
   "Director de Marketing", "Sales Director", "Director Comercial",
   "Director de Ventas", "CEO", "Director General"
 ];
+const KNOWN_LISTS = [
+  { id: "69f963722a501e001977a42d", name: "Qualified Contacts_H2_Hubspot&Freelan Approach" }
+];
 
 export async function startRun() {
   const run = {
@@ -19,6 +22,7 @@ export async function startRun() {
   let listError = null;
   try { lists = await listApolloLists(); }
   catch (error) { listError = error.message; }
+  lists = mergeLists(KNOWN_LISTS, lists);
   return {
     run,
     message: "Selecciona una lista de Apollo y define dos industrias, rango de empleados, países y cantidad objetivo.",
@@ -26,6 +30,10 @@ export async function startRun() {
     listError,
     suggestedRoles: ICP_ROLES
   };
+}
+
+function mergeLists(...groups) {
+  return [...new Map(groups.flat().map(item => [item.id, item])).values()];
 }
 
 export async function configureRun(id, filters) {
