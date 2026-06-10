@@ -39,7 +39,6 @@ export async function findApolloCandidates(filters, page = 1) {
       person_titles: filters.interpretation.roleTitles,
       person_seniorities: filters.interpretation.seniorities,
       person_locations: filters.interpretation.contactLocations,
-      q_keywords: filters.interpretation.companyKeywords.join(" "),
       include_similar_titles: true,
       contact_email_status: ["verified"]
     };
@@ -81,7 +80,8 @@ export function normalizeCandidate(person) {
       country: organization.country || "",
       zip: organization.postal_code || "",
       linkedin: organization.linkedin_url || "",
-      employees: organization.estimated_num_employees || organization.num_employees || null
+      employees: organization.estimated_num_employees || organization.num_employees || null,
+      keywords: organization.keywords || []
     }
   };
 }
@@ -109,7 +109,8 @@ function companyProperties(company) {
     name: company.name, domain: company.domain, website: company.website, phone: company.phone,
     city: company.city, state: company.state, country: company.country, zip: company.zip,
     linkedin_company_page: company.linkedin,
-    numberofemployees: company.employees ? String(company.employees) : undefined
+    numberofemployees: company.employees ? String(company.employees) : undefined,
+    apollo_company_keywords: company.keywords?.length ? company.keywords.join("; ") : undefined
   });
 }
 
@@ -149,7 +150,7 @@ async function associate(contactId, companyId) {
   });
 }
 
-export async function importCandidate(candidate) {
+export async function importCandidate(candidate, filters) {
   if (!candidate.email || !candidate.company.domain) {
     throw new Error("Missing verified email or company domain");
   }
@@ -158,13 +159,52 @@ export async function importCandidate(candidate) {
     ? await fillBlankProperties("companies", company.id, companyProperties(candidate.company))
     : await createObject("companies", companyProperties(candidate.company));
 
+  const contactIncoming = {
+    ...contactProperties(candidate),
+    freelan_icp_match_context: buildIcpContext(candidate, filters)
+  };
   let contact = await searchOne("contacts", "email", candidate.email, ["email", "firstname", "lastname"]);
   contact = contact
-    ? await fillBlankProperties("contacts", contact.id, contactProperties(candidate))
-    : await createObject("contacts", contactProperties(candidate));
+    ? await fillBlankProperties("contacts", contact.id, contactIncoming)
+    : await createObject("contacts", contactIncoming);
 
   await associate(contact.id, company.id);
   return { contactId: contact.id, companyId: company.id, email: candidate.email };
+}
+
+function buildIcpContext(candidate, filters) {
+  return [
+    "Coincidencia ICP seleccionada por Freelan Revenue Agent",
+    `Industria solicitada: ${filters.industry}`,
+    `Industria interpretada: ${filters.interpretation.industryKeywords.join(", ")}`,
+    `Rol encontrado: ${candidate.title}`,
+    `Roles objetivo: ${filters.roles.join(", ")}`,
+    `Señales solicitadas: ${filters.interpretation.companyKeywords.join(", ") || "Sin señales adicionales"}`,
+    `Brief del usuario: ${filters.adHocBrief || "Sin brief adicional"}`,
+    `Motivo: ${filters.interpretation.explanation}`
+  ].join("\n");
+}
+
+export async function ensureHubSpotProperties() {
+  const path = "/crm/v3/properties/contacts/freelan_icp_match_context";
+  try {
+    await hubspot(path);
+    return { created: false };
+  } catch (error) {
+    if (!error.message.startsWith("404")) throw error;
+  }
+  await hubspot("/crm/v3/properties/contacts", {
+    method: "POST",
+    body: JSON.stringify({
+      groupName: "contactinformation",
+      name: "freelan_icp_match_context",
+      label: "Freelan ICP Match Context",
+      type: "string",
+      fieldType: "textarea",
+      description: "Contexto y señales que explican por qué el contacto coincide con el ICP seleccionado."
+    })
+  });
+  return { created: true };
 }
 
 export async function verifyHubSpotConnection() {

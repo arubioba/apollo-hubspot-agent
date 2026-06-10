@@ -39,7 +39,8 @@ export async function interpretFilters(input) {
         "You translate a B2B ICP into Apollo-compatible search terms.",
         "Expand one industry into close Apollo taxonomy synonyms, always including the canonical English industry terms plus useful Spanish equivalents, not unrelated adjacent markets.",
         "Expand each selected role into Spanish and English title variants; roles are OR alternatives.",
-        "Use the free-text brief to propose useful company keywords, contact locations, exclusions and seniorities.",
+        "Use the free-text brief to propose useful company keywords as non-filtering context, plus contact locations, explicit exclusions and seniorities.",
+        "Company keywords are signals to document and prioritize, never mandatory Apollo search filters.",
         "Do not loosen mandatory verified email, valid phone, company domain, countries, or employee range.",
         "When optional company keywords or contact locations might overconstrain results, recommend removing them first in relaxation. Return concise Spanish explanation."
       ].join(" "),

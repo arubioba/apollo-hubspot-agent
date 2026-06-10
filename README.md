@@ -18,6 +18,8 @@ El límite de 50 contactos posteriores a prueba se acumula por día y se reinici
 - La prueba de cinco contactos no consume el límite diario.
 - El usuario selecciona una industria y hasta tres roles objetivo.
 - OpenAI propone la interpretación semántica y el usuario debe aprobarla antes de buscar.
+- Las palabras clave del brief no restringen Apollo; se guardan en `freelan_icp_match_context`.
+- Las keywords reales de la empresa se guardan en `apollo_company_keywords` cuando están disponibles.
 - Cualquier relajación de filtros requiere aprobación.
 - Solo candidatos con email verificado y algún teléfono disponible.
 - Contactos se deduplican por email; empresas por dominio.

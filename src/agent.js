@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { config } from "./config.js";
-import { findApolloCandidates, importCandidate } from "./clients.js";
+import { ensureHubSpotProperties, findApolloCandidates, importCandidate } from "./clients.js";
 import { interpretFilters } from "./interpreter.js";
 import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db.js";
 
@@ -51,14 +51,13 @@ export async function analyzeFilters(id, filters) {
 }
 
 function buildSafeRelaxation(interpretation) {
-  const removeCompanyKeywords = interpretation.companyKeywords.length > 0;
   const removeContactLocations = interpretation.contactLocations.length > 0;
   return {
-    removeCompanyKeywords,
+    removeCompanyKeywords: false,
     removeContactLocations,
-    broadenEmployeeRangeByPercent: removeCompanyKeywords || removeContactLocations ? 0 : 20,
-    explanation: removeCompanyKeywords || removeContactLocations
-      ? "Retirar primero palabras clave y ubicaciones opcionales interpretadas del brief, manteniendo industria, países, roles, email verificado, teléfono válido, dominio y rango de empleados."
+    broadenEmployeeRangeByPercent: removeContactLocations ? 0 : 20,
+    explanation: removeContactLocations
+      ? "Retirar primero ubicaciones opcionales del contacto, manteniendo industria, países de empresa, roles, email verificado, teléfono válido, dominio, rango de empleados y todas las señales del brief."
       : "Ampliar 20% el rango de empleados, manteniendo industria, países, roles, email verificado, teléfono válido y dominio."
   };
 }
@@ -98,7 +97,8 @@ export async function applyRelaxation(id) {
 export async function executeTest(id) {
   const run = await requiredRun(id);
   const batch = run.candidates.slice(0, config.testBatchSize);
-  run.testResults = await executeBatch(batch, false);
+  await ensureHubSpotProperties();
+  run.testResults = await executeBatch(batch, false, run.filters);
   run.phase = "test_review";
   await saveRun(run);
   return { run, message: "Prueba terminada. Verifica los contactos en HubSpot antes de continuar." };
@@ -117,7 +117,8 @@ export async function executeFinal(id, approvalCode) {
     };
   }
   const batch = run.candidates.slice(config.testBatchSize, config.testBatchSize + requested);
-  run.finalResults = await executeBatch(batch, true);
+  await ensureHubSpotProperties();
+  run.finalResults = await executeBatch(batch, true, run.filters);
   run.phase = "complete";
   await saveRun(run);
   const missing = requested - run.finalResults.successful.length;
@@ -129,12 +130,12 @@ export async function executeFinal(id, approvalCode) {
   };
 }
 
-async function executeBatch(batch, countAgainstLimit) {
+async function executeBatch(batch, countAgainstLimit, filters) {
   const successful = [];
   const failed = [];
   for (const candidate of batch) {
     try {
-      successful.push(await importCandidate(candidate));
+      successful.push(await importCandidate(candidate, filters));
     } catch (error) {
       failed.push({ email: candidate.email, error: error.message });
     }
