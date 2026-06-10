@@ -1,7 +1,7 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { config, getMissingConfig } from "./config.js";
-import { approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
+import { analyzeFilters, applyRelaxation, approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
 import { verifyHubSpotConnection } from "./clients.js";
 import { initDb } from "./db.js";
 
@@ -33,7 +33,9 @@ app.get("/health", (_, res) => res.json({
 app.get("/api/diagnostics/hubspot", route(() => verifyHubSpotConnection()));
 app.post("/api/runs", route(() => startRun()));
 app.post("/api/runs/:id/configure", route(req => configureRun(req.params.id, req.body)));
+app.post("/api/runs/:id/analyze", route(req => analyzeFilters(req.params.id, req.body)));
 app.post("/api/runs/:id/approve-roles", route(req => approveRoles(req.params.id)));
+app.post("/api/runs/:id/relax", route(req => applyRelaxation(req.params.id)));
 app.post("/api/runs/:id/test", route(req => executeTest(req.params.id)));
 app.post("/api/runs/:id/import", route(req => executeFinal(req.params.id, req.body.approvalCode)));
 

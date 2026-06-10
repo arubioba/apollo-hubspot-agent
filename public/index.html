@@ -11,17 +11,28 @@
     <header><strong>Freelan Revenue Agent</strong><span>Apollo → HubSpot</span></header>
     <section id="chat"></section>
     <form id="filters" hidden>
-      <label>Industria 1 <input id="industry1" required></label>
-      <label>Industria 2 <input id="industry2" required></label>
+      <label>Industria principal
+        <input id="industry" placeholder="Ej. Farmacéutica" required>
+        <small>Buscaremos taxonomías y términos similares para tu aprobación.</small>
+      </label>
       <div class="row">
         <label>Empleados mínimo <input id="min" type="number" value="50" required></label>
         <label>Empleados máximo <input id="max" type="number" value="5000" required></label>
       </div>
       <label>Países <input id="countries" value="Mexico, Colombia" required></label>
       <label>Contactos a importar después de la prueba <input id="quantity" type="number" value="50" min="1" required></label>
-      <fieldset><legend>Roles ICP sugeridos</legend><div id="roles"></div></fieldset>
-      <button>Validar filtros y roles</button>
+      <fieldset>
+        <legend>Roles objetivo, máximo 3</legend>
+        <input id="role-search" list="role-options" placeholder="Escribe o selecciona un rol">
+        <datalist id="role-options"></datalist>
+        <div id="selected-roles"></div>
+      </fieldset>
+      <label>Describe qué contactos y empresas buscas
+        <textarea id="ad-hoc" rows="4" placeholder="Incluye características, exclusiones, tecnologías, seniority o señales relevantes."></textarea>
+      </label>
+      <button>Interpretar filtros con IA</button>
     </form>
+    <section id="proposal" hidden></section>
     <div id="actions"></div>
   </main>
   <script type="module" src="/app.js"></script>

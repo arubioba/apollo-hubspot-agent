@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { config } from "./config.js";
 import { findApolloCandidates, importCandidate } from "./clients.js";
+import { interpretFilters } from "./interpreter.js";
 import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db.js";
 
 const ICP_ROLES = [
@@ -31,6 +32,23 @@ export async function configureRun(id, filters) {
   return { run, message: "Valida los roles ICP sugeridos antes de buscar candidatos." };
 }
 
+export async function analyzeFilters(id, filters) {
+  validateFilters(filters);
+  const run = await requiredRun(id);
+  const interpretation = await interpretFilters({
+    industry: filters.industry,
+    selectedRoles: filters.roles,
+    countries: filters.countries,
+    employeeRange: [filters.employeeMin, filters.employeeMax],
+    adHocBrief: filters.adHocBrief
+  });
+  run.filters = { ...filters, interpretation };
+  run.roles = filters.roles;
+  run.phase = "interpretation_pending";
+  await saveRun(run);
+  return { run, interpretation, message: "Revisa y aprueba cómo interpretaré tus filtros en Apollo." };
+}
+
 export async function approveRoles(id) {
   const run = await requiredRun(id);
   const candidates = [];
@@ -42,8 +60,25 @@ export async function approveRoles(id) {
   await saveRun(run);
   return {
     run,
-    message: `Encontré ${run.candidates.length} candidatos elegibles. La prueba usará los primeros ${Math.min(config.testBatchSize, run.candidates.length)}.`
+    message: run.candidates.length
+      ? `Encontré ${run.candidates.length} candidatos elegibles. La prueba usará los primeros ${Math.min(config.testBatchSize, run.candidates.length)}.`
+      : "No encontré candidatos. Revisa la propuesta para relajar filtros antes de volver a buscar.",
+    relaxationProposal: run.candidates.length ? null : run.filters.interpretation.relaxation
   };
+}
+
+export async function applyRelaxation(id) {
+  const run = await requiredRun(id);
+  const proposal = run.filters.interpretation.relaxation;
+  if (proposal.removeCompanyKeywords) run.filters.interpretation.companyKeywords = [];
+  if (proposal.removeContactLocations) run.filters.interpretation.contactLocations = [];
+  if (proposal.broadenEmployeeRangeByPercent) {
+    const factor = proposal.broadenEmployeeRangeByPercent / 100;
+    run.filters.employeeMin = Math.max(1, Math.floor(run.filters.employeeMin * (1 - factor)));
+    run.filters.employeeMax = Math.ceil(run.filters.employeeMax * (1 + factor));
+  }
+  await saveRun(run);
+  return approveRoles(id);
 }
 
 export async function executeTest(id) {
@@ -111,10 +146,10 @@ function uniqueByEmail(items) {
 }
 
 function validateFilters(filters) {
-  if (!Array.isArray(filters.industries) || filters.industries.length !== 2) throw new Error("Selecciona exactamente dos industrias.");
+  if (!filters.industry?.trim()) throw new Error("Escribe una industria.");
   if (!filters.employeeMin || !filters.employeeMax || filters.employeeMin > filters.employeeMax) throw new Error("Define un rango válido de empleados.");
   if (!Array.isArray(filters.countries) || !filters.countries.length) throw new Error("Selecciona al menos un país.");
-  if (!Array.isArray(filters.roles) || !filters.roles.length) throw new Error("Valida al menos un rol ICP.");
+  if (!Array.isArray(filters.roles) || !filters.roles.length || filters.roles.length > 3) throw new Error("Selecciona entre uno y tres roles.");
   if (!Number.isInteger(filters.quantity) || filters.quantity < 1) throw new Error("La cantidad debe ser mayor que cero.");
 }
 

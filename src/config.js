@@ -3,6 +3,8 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL,
   apolloKey: process.env.APOLLO_API_KEY,
   hubspotToken: normalizeSecret(process.env.HUBSPOT_PRIVATE_APP_TOKEN || process.env.HUBSPOT_ACCESS_TOKEN),
+  openaiKey: normalizeSecret(process.env.OPENAI_API_KEY),
+  openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   approvalCode: process.env.APPROVAL_CODE,
   timezone: process.env.TZ || "America/Mexico_City",
   dailyLimit: Number(process.env.DAILY_IMPORT_LIMIT || 50),
@@ -25,6 +27,7 @@ export function getMissingConfig() {
     ["DATABASE_URL", config.databaseUrl],
     ["APOLLO_API_KEY", config.apolloKey],
     ["HUBSPOT_PRIVATE_APP_TOKEN or HUBSPOT_ACCESS_TOKEN", config.hubspotToken],
+    ["OPENAI_API_KEY", config.openaiKey],
     ["APPROVAL_CODE", config.approvalCode]
   ].filter(([, value]) => !value).map(([name]) => name);
 }
