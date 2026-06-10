@@ -17,11 +17,6 @@ const button = (label, fn) => {
 async function boot() {
   const data = await call("/api/runs");
   run = data.run; say(data.message);
-  document.querySelector("#apollo-lists").innerHTML = data.lists
-    .map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
-  if (data.lists.length) document.querySelector("#list").value = data.lists[0].id;
-  if (data.listError) say(`Apollo no pudo listar las listas automáticamente. Pega el ID de la lista manualmente. Detalle: ${data.listError}`);
-  else if (!data.lists.length) say("Apollo no devolvió listas disponibles. Pega el ID de la lista manualmente.");
   document.querySelector("#roles").innerHTML = data.suggestedRoles.map((x,i) =>
     `<label><input type="checkbox" value="${escapeHtml(x)}" checked> ${escapeHtml(x)}</label>`).join("");
   form.hidden = false;
@@ -31,7 +26,6 @@ form.onsubmit = async e => {
   e.preventDefault();
   try {
     const body = {
-      listId: document.querySelector("#list").value,
       industries: [document.querySelector("#industry1").value, document.querySelector("#industry2").value],
       employeeMin: Number(document.querySelector("#min").value),
       employeeMax: Number(document.querySelector("#max").value),

@@ -1,6 +1,6 @@
 # Freelan Apollo → HubSpot Agent
 
-Aplicación interna conversacional para filtrar listas de Apollo, validar roles ICP, ejecutar una prueba de cinco contactos e importar a HubSpot con reporte.
+Aplicación interna conversacional para buscar contactos directamente en Apollo, validar roles ICP, ejecutar una prueba de cinco contactos e importar a HubSpot con reporte.
 
 ## Railway
 

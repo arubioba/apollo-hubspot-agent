@@ -27,17 +27,10 @@ function hubspot(path, options = {}) {
   });
 }
 
-export async function listApolloLists() {
-  const data = await apollo("/labels", {}, "GET");
-  return (data.labels || []).filter(x => x.modality === "contact" || !x.modality)
-    .map(x => ({ id: x.id, name: x.name }));
-}
-
 export async function findApolloCandidates(filters, page = 1) {
   const payload = {
     page,
     per_page: 100,
-    contact_label_ids: [filters.listId],
     organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
     organization_locations: filters.countries,
     q_organization_keyword_tags: filters.industries,

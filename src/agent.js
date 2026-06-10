@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { config } from "./config.js";
-import { findApolloCandidates, importCandidate, listApolloLists } from "./clients.js";
+import { findApolloCandidates, importCandidate } from "./clients.js";
 import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db.js";
 
 const ICP_ROLES = [
@@ -8,32 +8,17 @@ const ICP_ROLES = [
   "Director de Marketing", "Sales Director", "Director Comercial",
   "Director de Ventas", "CEO", "Director General"
 ];
-const KNOWN_LISTS = [
-  { id: "69f963722a501e001977a42d", name: "Qualified Contacts_H2_Hubspot&Freelan Approach" }
-];
-
 export async function startRun() {
   const run = {
     id: crypto.randomUUID(), phase: "collecting", filters: {}, roles: ICP_ROLES,
     candidates: [], testResults: {}, finalResults: {}
   };
   await saveRun(run);
-  let lists = [];
-  let listError = null;
-  try { lists = await listApolloLists(); }
-  catch (error) { listError = error.message; }
-  lists = mergeLists(KNOWN_LISTS, lists);
   return {
     run,
-    message: "Selecciona una lista de Apollo y define dos industrias, rango de empleados, países y cantidad objetivo.",
-    lists,
-    listError,
+    message: "Define dos industrias, rango de empleados, países y cantidad objetivo. Buscaré directamente entre todos los contactos disponibles en Apollo.",
     suggestedRoles: ICP_ROLES
   };
-}
-
-function mergeLists(...groups) {
-  return [...new Map(groups.flat().map(item => [item.id, item])).values()];
 }
 
 export async function configureRun(id, filters) {
@@ -126,7 +111,6 @@ function uniqueByEmail(items) {
 }
 
 function validateFilters(filters) {
-  if (!filters.listId) throw new Error("Selecciona una lista de Apollo.");
   if (!Array.isArray(filters.industries) || filters.industries.length !== 2) throw new Error("Selecciona exactamente dos industrias.");
   if (!filters.employeeMin || !filters.employeeMax || filters.employeeMin > filters.employeeMax) throw new Error("Define un rango válido de empleados.");
   if (!Array.isArray(filters.countries) || !filters.countries.length) throw new Error("Selecciona al menos un país.");
