@@ -12,11 +12,15 @@ export const config = {
 };
 
 export function assertConfig() {
-  const missing = [
+  const missing = getMissingConfig();
+  if (missing.length) throw new Error(`Missing environment variables: ${missing.join(", ")}`);
+}
+
+export function getMissingConfig() {
+  return [
     ["DATABASE_URL", config.databaseUrl],
     ["APOLLO_API_KEY", config.apolloKey],
     ["HUBSPOT_PRIVATE_APP_TOKEN or HUBSPOT_ACCESS_TOKEN", config.hubspotToken],
     ["APPROVAL_CODE", config.approvalCode]
   ].filter(([, value]) => !value).map(([name]) => name);
-  if (missing.length) throw new Error(`Missing environment variables: ${missing.join(", ")}`);
 }

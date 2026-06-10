@@ -1,10 +1,8 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
-import { assertConfig, config } from "./config.js";
+import { config, getMissingConfig } from "./config.js";
 import { approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
 import { initDb } from "./db.js";
-
-assertConfig();
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -14,6 +12,10 @@ let dbReady = false;
 let dbError = null;
 
 const route = handler => async (req, res) => {
+  const missingConfig = getMissingConfig();
+  if (missingConfig.length) {
+    return res.status(503).json({ error: "Server configuration is incomplete.", missingConfig });
+  }
   if (!dbReady) {
     return res.status(503).json({ error: "Database initialization is not complete." });
   }
@@ -23,7 +25,9 @@ const route = handler => async (req, res) => {
 
 app.get("/health", (_, res) => res.json({
   ok: true,
-  database: dbReady ? "ready" : dbError ? "error" : "initializing"
+  database: dbReady ? "ready" : dbError ? "error" : "initializing",
+  configuration: getMissingConfig().length ? "incomplete" : "ready",
+  missingConfig: getMissingConfig()
 }));
 app.post("/api/runs", route(() => startRun()));
 app.post("/api/runs/:id/configure", route(req => configureRun(req.params.id, req.body)));
@@ -33,6 +37,11 @@ app.post("/api/runs/:id/import", route(req => executeFinal(req.params.id, req.bo
 
 app.listen(config.port, "0.0.0.0", async () => {
   console.log(`Freelan agent listening on ${config.port}`);
+  if (!config.databaseUrl) {
+    dbError = "DATABASE_URL is missing";
+    console.error("Database initialization skipped: DATABASE_URL is missing");
+    return;
+  }
   try {
     await initDb();
     dbReady = true;
