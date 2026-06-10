@@ -16,11 +16,14 @@ export async function startRun() {
   };
   await saveRun(run);
   let lists = [];
-  try { lists = await listApolloLists(); } catch {}
+  let listError = null;
+  try { lists = await listApolloLists(); }
+  catch (error) { listError = error.message; }
   return {
     run,
     message: "Selecciona una lista de Apollo y define dos industrias, rango de empleados, países y cantidad objetivo.",
     lists,
+    listError,
     suggestedRoles: ICP_ROLES
   };
 }
