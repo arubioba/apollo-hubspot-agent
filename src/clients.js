@@ -219,3 +219,20 @@ export async function verifyHubSpotConnection() {
     };
   }
 }
+
+export async function readHubSpotContactProfiles(contactIds) {
+  if (!contactIds.length) return [];
+  const properties = [
+    "firstname", "lastname", "email", "jobtitle", "company", "city", "state", "country",
+    "phone", "hs_whatsapp_phone_number", "hs_linkedin_url", "freelan_icp_match_context",
+    "createdate", "lastmodifieddate"
+  ];
+  const data = await hubspot("/crm/v3/objects/contacts/batch/read", {
+    method: "POST",
+    body: JSON.stringify({
+      inputs: contactIds.map(id => ({ id: String(id) })),
+      properties
+    })
+  });
+  return data.results || [];
+}

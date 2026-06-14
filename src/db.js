@@ -77,3 +77,15 @@ export async function loadRun(id) {
     candidates: row.candidates, testResults: row.test_results, finalResults: row.final_results
   };
 }
+
+export async function getLatestSuccessfulRun() {
+  const result = await pool.query(`
+    SELECT id, created_at, updated_at, phase, filters, test_results, final_results
+    FROM import_runs
+    WHERE jsonb_array_length(COALESCE(test_results->'successful', '[]'::jsonb)) > 0
+       OR jsonb_array_length(COALESCE(final_results->'successful', '[]'::jsonb)) > 0
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `);
+  return result.rows[0] || null;
+}

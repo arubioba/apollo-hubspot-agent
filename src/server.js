@@ -2,9 +2,9 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { config, getMissingConfig } from "./config.js";
 import { analyzeFilters, applyRelaxation, approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
-import { ensureHubSpotProperties, verifyHubSpotConnection } from "./clients.js";
+import { ensureHubSpotProperties, readHubSpotContactProfiles, verifyHubSpotConnection } from "./clients.js";
 import { verifyOpenAIConnection } from "./interpreter.js";
-import { initDb } from "./db.js";
+import { getLatestSuccessfulRun, initDb } from "./db.js";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -33,6 +33,34 @@ app.get("/health", (_, res) => res.json({
 }));
 app.get("/api/diagnostics/hubspot", route(() => verifyHubSpotConnection()));
 app.get("/api/diagnostics/openai", route(() => verifyOpenAIConnection()));
+app.get("/api/audit/latest-import", route(async () => {
+  const run = await getLatestSuccessfulRun();
+  if (!run) return { found: false, message: "No successful imports found." };
+
+  const testSuccessful = run.test_results?.successful || [];
+  const finalSuccessful = run.final_results?.successful || [];
+  const successful = [...testSuccessful, ...finalSuccessful];
+  const unique = [...new Map(successful.map(item => [String(item.contactId), item])).values()];
+  const contacts = await readHubSpotContactProfiles(unique.map(item => item.contactId));
+
+  return {
+    found: true,
+    runId: run.id,
+    phase: run.phase,
+    importedAt: run.updated_at,
+    runCreatedAt: run.created_at,
+    testImported: testSuccessful.length,
+    finalImported: finalSuccessful.length,
+    totalImported: unique.length,
+    filters: run.filters,
+    contacts: contacts.map(contact => ({
+      id: contact.id,
+      createdAt: contact.createdAt,
+      updatedAt: contact.updatedAt,
+      ...contact.properties
+    }))
+  };
+}));
 app.post("/api/setup/hubspot-properties", route(() => ensureHubSpotProperties()));
 app.post("/api/runs", route(() => startRun()));
 app.post("/api/runs/:id/configure", route(req => configureRun(req.params.id, req.body)));
