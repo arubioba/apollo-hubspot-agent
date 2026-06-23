@@ -1,15 +1,31 @@
 let run;
 let selectedRoles = [];
+let adminToken = sessionStorage.getItem("araAdminToken") || "";
 const chat = document.querySelector("#chat");
 const form = document.querySelector("#filters");
 const actions = document.querySelector("#actions");
 const proposal = document.querySelector("#proposal");
 
 const say = text => chat.insertAdjacentHTML("beforeend", `<div class="msg">${escapeHtml(text)}</div>`);
-const call = async (path, body = {}) => {
-  const response = await fetch(path, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+const call = async (path, body = {}, method = "POST") => {
+  if (!adminToken) {
+    adminToken = prompt("Token interno ARA") || "";
+    sessionStorage.setItem("araAdminToken", adminToken);
+  }
+  const response = await fetch(path, {
+    method,
+    headers:{"Content-Type":"application/json", "X-ARA-Admin-Token": adminToken},
+    body: method === "GET" ? undefined : JSON.stringify(body)
+  });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error);
+  if (!response.ok) {
+    const message = data.error?.message || "No se pudo completar la operacion.";
+    const suffix = data.correlation_id ? ` Correlation ID: ${data.correlation_id}` : "";
+    const error = new Error(`${message}.${suffix}`);
+    error.code = data.error?.code;
+    error.correlationId = data.correlation_id;
+    throw error;
+  }
   return data;
 };
 const button = (label, fn) => {
@@ -92,7 +108,7 @@ async function search() {
       button("Modificar filtros", modify);
       return;
     }
-    renderCandidates(run.candidates.slice(0,5));
+    await renderRunCandidates(run.id);
     button("Ejecutar prueba de 5", test);
     button("Modificar filtros", modify);
     button("Nueva búsqueda", boot);
@@ -104,7 +120,7 @@ async function relax() {
   try {
     const data = await call(`/api/runs/${run.id}/relax`);
     run = data.run; say(data.message);
-    if (run.candidates.length) { renderCandidates(run.candidates.slice(0,5)); button("Ejecutar prueba de 5", test); }
+    if (run.candidates.length) { await renderRunCandidates(run.id); button("Ejecutar prueba de 5", test); }
     else { say("La relajación aprobada tampoco encontró candidatos."); button("Modificar filtros", modify); }
     button("Nueva búsqueda", boot);
   } catch(error) { say(`Error: ${error.message}`); }
@@ -137,7 +153,16 @@ async function finalImport(code) {
     button("Nueva búsqueda", boot);
   } catch(error){ say(`Error: ${error.message}`); }
 }
-function renderCandidates(items){ say(items.map(x=>`${x.firstName} ${x.lastName} | ${x.title} | ${x.email}`).join("\n")); }
+async function renderRunCandidates(runId) {
+  try {
+    const data = await call(`/api/import-runs/${runId}/candidates?page_size=5`, {}, "GET");
+    renderCandidates(data.candidates || []);
+  } catch(error) {
+    say(`No pude cargar candidatos: ${error.message}`);
+    renderCandidates(run.candidates.slice(0,5));
+  }
+}
+function renderCandidates(items){ say(items.map(x=>`${x.name || `${x.firstName || ""} ${x.lastName || ""}`.trim()} | ${x.title || ""} | ${x.company?.name || x.company || ""} | ${x.email || ""} | ${x.status || "candidate"}`).join("\n")); }
 function renderReport(r){ say(`Exitosos: ${r.successful?.length||0}\nFallidos: ${r.failed?.length||0}\n${(r.failed||[]).map(x=>`${x.email}: ${x.error}`).join("\n")}`); }
 function escapeHtml(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 boot().catch(e=>say(`No se pudo iniciar: ${e.message}`));
