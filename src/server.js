@@ -1,88 +1,94 @@
-import express from "express";
-import { fileURLToPath } from "node:url";
-import { config, getMissingConfig } from "./config.js";
+import { config, validateConfig } from "./config.js";
+import { createApp } from "./app.js";
 import { analyzeFilters, applyRelaxation, approveRoles, configureRun, executeFinal, executeTest, startRun } from "./agent.js";
-import { ensureHubSpotProperties, readHubSpotContactProfiles, verifyHubSpotConnection } from "./clients.js";
+import { ensureHubSpotProperties, verifyHubSpotConnection } from "./clients.js";
 import { verifyOpenAIConnection } from "./interpreter.js";
-import { getLatestSuccessfulRun, initDb } from "./db.js";
-
-const app = express();
-app.use(express.json({ limit: "1mb" }));
-app.use(express.static(fileURLToPath(new URL("../public", import.meta.url))));
+import { closeDb, getLatestSuccessfulRun, initDb } from "./db.js";
+import { logger } from "./logger.js";
+import { serializeAuditRun, serializeRunCandidates } from "./http-serializers.js";
+import { loadRun } from "./db.js";
 
 let dbReady = false;
 let dbError = null;
+let server = null;
 
-const route = handler => async (req, res) => {
-  const missingConfig = getMissingConfig();
-  if (missingConfig.length) {
-    return res.status(503).json({ error: "Server configuration is incomplete.", missingConfig });
-  }
-  if (!dbReady) {
-    return res.status(503).json({ error: "Database initialization is not complete." });
-  }
-  try { res.json(await handler(req, res)); }
-  catch (error) { res.status(400).json({ error: error.message }); }
+const handlers = {
+  verifyHubSpotConnection,
+  verifyOpenAIConnection,
+  ensureHubSpotProperties,
+  startRun,
+  configureRun,
+  analyzeFilters,
+  approveRoles,
+  applyRelaxation,
+  executeTest,
+  executeFinal,
+  latestImportAudit,
+  listRunCandidates
 };
 
-app.get("/health", (_, res) => res.json({
-  ok: true,
-  database: dbReady ? "ready" : dbError ? "error" : "initializing",
-  configuration: getMissingConfig().length ? "incomplete" : "ready",
-  missingConfig: getMissingConfig()
-}));
-app.get("/api/diagnostics/hubspot", route(() => verifyHubSpotConnection()));
-app.get("/api/diagnostics/openai", route(() => verifyOpenAIConnection()));
-app.get("/api/audit/latest-import", route(async () => {
+async function latestImportAudit() {
   const run = await getLatestSuccessfulRun();
-  if (!run) return { found: false, message: "No successful imports found." };
+  return serializeAuditRun(run);
+}
 
-  const testSuccessful = run.test_results?.successful || [];
-  const finalSuccessful = run.final_results?.successful || [];
-  const successful = [...testSuccessful, ...finalSuccessful];
-  const unique = [...new Map(successful.map(item => [String(item.contactId), item])).values()];
-  const contacts = await readHubSpotContactProfiles(unique.map(item => item.contactId));
+async function listRunCandidates(runId, query) {
+  const run = await loadRun(runId);
+  if (!run) return { found: false, candidates: [], pagination: { page: 1, page_size: 25, total: 0 } };
+  return serializeRunCandidates(run, {
+    page: Math.max(1, Number(query.page || 1)),
+    pageSize: Math.min(100, Math.max(1, Number(query.page_size || 25)))
+  });
+}
 
-  return {
-    found: true,
-    runId: run.id,
-    phase: run.phase,
-    importedAt: run.updated_at,
-    runCreatedAt: run.created_at,
-    testImported: testSuccessful.length,
-    finalImported: finalSuccessful.length,
-    totalImported: unique.length,
-    filters: run.filters,
-    contacts: contacts.map(contact => ({
-      id: contact.id,
-      createdAt: contact.createdAt,
-      updatedAt: contact.updatedAt,
-      ...contact.properties
-    }))
-  };
-}));
-app.post("/api/setup/hubspot-properties", route(() => ensureHubSpotProperties()));
-app.post("/api/runs", route(() => startRun()));
-app.post("/api/runs/:id/configure", route(req => configureRun(req.params.id, req.body)));
-app.post("/api/runs/:id/analyze", route(req => analyzeFilters(req.params.id, req.body)));
-app.post("/api/runs/:id/approve-roles", route(req => approveRoles(req.params.id)));
-app.post("/api/runs/:id/relax", route(req => applyRelaxation(req.params.id)));
-app.post("/api/runs/:id/test", route(req => executeTest(req.params.id)));
-app.post("/api/runs/:id/import", route(req => executeFinal(req.params.id, req.body.approvalCode)));
-
-app.listen(config.port, "0.0.0.0", async () => {
-  console.log(`Freelan agent listening on ${config.port}`);
-  if (!config.databaseUrl) {
-    dbError = "DATABASE_URL is missing";
-    console.error("Database initialization skipped: DATABASE_URL is missing");
+async function start() {
+  const validation = validateConfig();
+  if (!validation.ok) {
+    logger.error("server.startup_failed", "Invalid server configuration.", {
+      missing: validation.missing,
+      errors: validation.errors
+    });
+    process.exitCode = 1;
     return;
   }
+
   try {
     await initDb();
     dbReady = true;
-    console.log("Database initialized");
   } catch (error) {
     dbError = error.message;
-    console.error("Database initialization failed:", error.message);
+    logger.error("server.startup_failed", "Database initialization failed.", { error });
+    process.exitCode = 1;
+    return;
   }
+
+  const app = createApp({
+    config,
+    logger,
+    isDbReady: () => dbReady,
+    getDbError: () => dbError,
+    handlers
+  });
+
+  server = app.listen(config.port, "0.0.0.0", () => {
+    logger.info("server.started", "Freelan agent listening.", { port: config.port });
+  });
+}
+
+async function stop(signal) {
+  logger.info("server.stopping", "Server stopping.", { signal });
+  await new Promise(resolve => {
+    if (!server) return resolve();
+    server.close(() => resolve());
+  });
+  await closeDb();
+  logger.info("server.stopped", "Server stopped.", { signal });
+}
+
+process.on("SIGTERM", () => stop("SIGTERM").then(() => process.exit(0)));
+process.on("SIGINT", () => stop("SIGINT").then(() => process.exit(0)));
+
+start().catch(error => {
+  logger.error("server.startup_failed", "Unexpected startup failure.", { error });
+  process.exit(1);
 });

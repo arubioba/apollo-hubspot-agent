@@ -1,4 +1,7 @@
 import { config } from "./config.js";
+import { ApolloError, ApolloRateLimitError, HubSpotError, ValidationError } from "./errors.js";
+import { logger } from "./logger.js";
+import { assertHubSpotWriteAllowed, isPreviewMode } from "./write-guard.js";
 
 async function request(url, options = {}) {
   const response = await fetch(url, options);
@@ -8,23 +11,33 @@ async function request(url, options = {}) {
   return body;
 }
 
-function apollo(path, body, method = "POST") {
-  return request(`${config.apolloBase}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", "X-Api-Key": config.apolloKey },
-    body: method === "GET" ? undefined : JSON.stringify(body)
-  });
+async function apollo(path, body, method = "POST") {
+  try {
+    return await request(`${config.apolloBase}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", "X-Api-Key": config.apolloKey },
+      body: method === "GET" ? undefined : JSON.stringify(body)
+    });
+  } catch (error) {
+    logger.error("apollo.search.failed", "Apollo request failed.", { path, error });
+    if (error.message.startsWith("429")) throw new ApolloRateLimitError("Apollo rate limit exceeded.", { cause: error });
+    throw new ApolloError("Apollo request failed.", { cause: error });
+  }
 }
 
-function hubspot(path, options = {}) {
-  return request(`${config.hubspotBase}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.hubspotToken}`,
-      ...options.headers
-    }
-  });
+async function hubspot(path, options = {}) {
+  try {
+    return await request(`${config.hubspotBase}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.hubspotToken}`,
+        ...options.headers
+      }
+    });
+  } catch (error) {
+    throw new HubSpotError("HubSpot request failed.", { cause: error });
+  }
 }
 
 export async function findApolloCandidates(filters, page = 1) {
@@ -45,9 +58,21 @@ export async function findApolloCandidates(filters, page = 1) {
     const data = await apollo("/contacts/search", payload);
     results.push(...(data.people || data.contacts || []));
   }
-  return [...new Map(results.map(person => [person.id, person])).values()].map(normalizeCandidate)
-    .filter(c => c.emailVerified && c.company.domain && c.validPhones.some(isMappableContactPhone))
-    .filter(c => !matchesExcludedTitle(c.title, filters.interpretation.excludedTitles));
+  return [...new Map(results.map(person => [person.id, person])).values()].map(person => {
+    const candidate = normalizeCandidate(person);
+    logger.debug("candidate.normalized", "Candidate normalized.", { email: candidate.email, apolloId: candidate.apolloId });
+    return candidate;
+  })
+    .filter(c => {
+      const accepted = c.emailVerified && c.company.domain && c.validPhones.some(isMappableContactPhone);
+      if (!accepted) logger.debug("candidate.rejected", "Candidate rejected by eligibility filters.", { email: c.email, title: c.title });
+      return accepted;
+    })
+    .filter(c => {
+      const rejected = matchesExcludedTitle(c.title, filters.interpretation.excludedTitles);
+      if (rejected) logger.debug("candidate.rejected", "Candidate rejected by title exclusion.", { email: c.email, title: c.title });
+      return !rejected;
+    });
 }
 
 function matchesExcludedTitle(title, exclusions) {
@@ -130,6 +155,7 @@ async function searchOne(objectType, propertyName, value, properties) {
 }
 
 async function createObject(objectType, properties) {
+  assertHubSpotWriteAllowed(`hubspot.${objectType}.create`, { objectType });
   return hubspot(`/crm/v3/objects/${objectType}`, {
     method: "POST", body: JSON.stringify({ properties })
   });
@@ -139,12 +165,14 @@ async function fillBlankProperties(objectType, id, incoming) {
   const current = await hubspot(`/crm/v3/objects/${objectType}/${id}?properties=${Object.keys(incoming).join(",")}`);
   const updates = Object.fromEntries(Object.entries(incoming).filter(([key]) => !current.properties?.[key]));
   if (!Object.keys(updates).length) return current;
+  assertHubSpotWriteAllowed(`hubspot.${objectType}.update`, { objectType, id });
   return hubspot(`/crm/v3/objects/${objectType}/${id}`, {
     method: "PATCH", body: JSON.stringify({ properties: updates })
   });
 }
 
 async function associate(contactId, companyId) {
+  assertHubSpotWriteAllowed("hubspot.association.create", { contactId, companyId });
   return hubspot(`/crm/v4/objects/contacts/${contactId}/associations/default/companies/${companyId}`, {
     method: "PUT"
   });
@@ -152,17 +180,24 @@ async function associate(contactId, companyId) {
 
 export async function importCandidate(candidate, filters) {
   if (!candidate.email || !candidate.company.domain) {
-    throw new Error("Missing verified email or company domain");
+    throw new ValidationError("Missing verified email or company domain");
   }
-  let company = await searchOne("companies", "domain", candidate.company.domain, ["domain", "name"]);
-  company = company
-    ? await fillBlankProperties("companies", company.id, companyProperties(candidate.company))
-    : await createObject("companies", companyProperties(candidate.company));
-
   const contactIncoming = {
     ...contactProperties(candidate),
     freelan_icp_match_context: buildIcpContext(candidate, filters)
   };
+  const companyIncoming = companyProperties(candidate.company);
+  if (isPreviewMode()) {
+    logger.info("hubspot.preview.completed", "HubSpot candidate preview completed.", { email: candidate.email });
+    return { preview: true, email: candidate.email, contactProperties: contactIncoming, companyProperties: companyIncoming };
+  }
+  assertHubSpotWriteAllowed("hubspot.candidate.import", { email: candidate.email });
+
+  let company = await searchOne("companies", "domain", candidate.company.domain, ["domain", "name"]);
+  company = company
+    ? await fillBlankProperties("companies", company.id, companyIncoming)
+    : await createObject("companies", companyIncoming);
+
   let contact = await searchOne("contacts", "email", candidate.email, ["email", "firstname", "lastname"]);
   contact = contact
     ? await fillBlankProperties("contacts", contact.id, contactIncoming)
@@ -179,19 +214,20 @@ function buildIcpContext(candidate, filters) {
     `Industria interpretada: ${filters.interpretation.industryKeywords.join(", ")}`,
     `Rol encontrado: ${candidate.title}`,
     `Roles objetivo: ${filters.roles.join(", ")}`,
-    `Señales solicitadas: ${filters.interpretation.companyKeywords.join(", ") || "Sin señales adicionales"}`,
+    `Senales solicitadas: ${filters.interpretation.companyKeywords.join(", ") || "Sin senales adicionales"}`,
     `Brief del usuario: ${filters.adHocBrief || "Sin brief adicional"}`,
     `Motivo: ${filters.interpretation.explanation}`
   ].join("\n");
 }
 
 export async function ensureHubSpotProperties() {
+  assertHubSpotWriteAllowed("hubspot.properties.ensure");
   const path = "/crm/v3/properties/contacts/freelan_icp_match_context";
   try {
     await hubspot(path);
     return { created: false };
   } catch (error) {
-    if (!error.message.startsWith("404")) throw error;
+    if (!error.cause?.message?.startsWith("404")) throw error;
   }
   await hubspot("/crm/v3/properties/contacts", {
     method: "POST",
@@ -201,7 +237,7 @@ export async function ensureHubSpotProperties() {
       label: "Freelan ICP Match Context",
       type: "string",
       fieldType: "textarea",
-      description: "Contexto y señales que explican por qué el contacto coincide con el ICP seleccionado."
+      description: "Contexto y senales que explican por que el contacto coincide con el ICP seleccionado."
     })
   });
   return { created: true };
