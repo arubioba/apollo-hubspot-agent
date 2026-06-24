@@ -1,6 +1,6 @@
 let run;
 let selectedRoles = [];
-let adminToken = sessionStorage.getItem("araAdminToken") || "";
+let adminToken = normalizeToken(sessionStorage.getItem("araAdminToken") || "");
 
 const $ = selector => document.querySelector(selector);
 const feed = $("#operator-feed");
@@ -63,7 +63,7 @@ async function startRun() {
 
 function bindEvents() {
   actions.token.onclick = () => {
-    adminToken = prompt("Token interno ARA", adminToken) || "";
+    adminToken = normalizeToken(prompt("Token interno ARA", adminToken) || "");
     sessionStorage.setItem("araAdminToken", adminToken);
     updateTokenButton();
     if (adminToken) startRun().catch(showError);
@@ -277,7 +277,7 @@ function showError(error) {
 
 async function call(path, body = {}, method = "POST") {
   if (!adminToken) {
-    adminToken = prompt("Token interno ARA") || "";
+    adminToken = normalizeToken(prompt("Token interno ARA") || "");
     sessionStorage.setItem("araAdminToken", adminToken);
     updateTokenButton();
   }
@@ -309,6 +309,10 @@ async function call(path, body = {}, method = "POST") {
 function updateTokenButton() {
   actions.token.textContent = adminToken ? "Token cargado" : "Token";
   actions.token.classList.toggle("ready", Boolean(adminToken));
+}
+
+function normalizeToken(value = "") {
+  return String(value).trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "");
 }
 
 async function safeJson(response) {

@@ -104,6 +104,13 @@ test("internal auth accepts valid token and rejects invalid token without exposi
   assert.throws(() => requireInternalAuth(reqWithToken("wrong-token")), AuthenticationError);
 });
 
+test("internal auth normalizes copied token wrappers", () => {
+  config.adminToken = "test-admin-token";
+  assert.doesNotThrow(() => requireInternalAuth(reqWithToken("  test-admin-token  ")));
+  assert.doesNotThrow(() => requireInternalAuth(reqWithToken("Bearer test-admin-token")));
+  assert.doesNotThrow(() => requireInternalAuth(reqWithToken('"test-admin-token"')));
+});
+
 test("internal auth rejects missing token", () => {
   config.adminToken = "test-admin-token";
   assert.throws(() => requireInternalAuth(reqWithToken(undefined)), AuthenticationError);

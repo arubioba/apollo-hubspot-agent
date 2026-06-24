@@ -11,12 +11,16 @@ function safeEqual(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+function normalizeToken(value) {
+  return String(value || "").trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "");
+}
+
 export function requireInternalAuth(req) {
   if (!config.adminToken) {
     logger.warn("authorization.denied", "Admin token is not configured.");
     throw new AuthenticationError("Internal authentication is not configured.", { status: 503 });
   }
-  const token = req.get(HEADER);
+  const token = normalizeToken(req.get(HEADER));
   if (!token || !safeEqual(token, config.adminToken)) {
     logger.warn("authorization.denied", "Invalid or missing admin token.", {
       path: req.path,
