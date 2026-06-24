@@ -15,6 +15,7 @@ export const envSpec = [
   { name: "ARA_ADMIN_TOKEN", required: true, secret: true, environmentSpecific: true },
   { name: "ARA_OPERATOR_EMAIL", required: true, secret: false, environmentSpecific: true },
   { name: "ARA_OPERATOR_PASSWORD", required: true, secret: true, environmentSpecific: true },
+  { name: "ARA_OPERATOR_USERS_JSON", required: false, secret: true, environmentSpecific: true },
   { name: "ARA_DEFAULT_TENANT_ID", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_WRITE_MODE", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_EXTERNAL_SERVICES_MODE", required: false, secret: false, environmentSpecific: true },
@@ -31,6 +32,10 @@ export const envSpec = [
   { name: "HUBSPOT_API_BASE", required: false, secret: false, environmentSpecific: true }
 ];
 
+const operatorEmail = normalizeSecret(process.env.ARA_OPERATOR_EMAIL)?.toLowerCase();
+const operatorPassword = normalizeSecret(process.env.ARA_OPERATOR_PASSWORD);
+const operatorUsersConfig = parseOperatorUsers(process.env.ARA_OPERATOR_USERS_JSON, operatorEmail, operatorPassword);
+
 export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: Number(process.env.PORT || 3000),
@@ -41,8 +46,10 @@ export const config = {
   openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   approvalCode: normalizeSecret(process.env.APPROVAL_CODE),
   adminToken: normalizeSecret(process.env.ARA_ADMIN_TOKEN),
-  operatorEmail: normalizeSecret(process.env.ARA_OPERATOR_EMAIL)?.toLowerCase(),
-  operatorPassword: normalizeSecret(process.env.ARA_OPERATOR_PASSWORD),
+  operatorEmail,
+  operatorPassword,
+  operatorUsers: operatorUsersConfig.users,
+  operatorUsersError: operatorUsersConfig.error,
   defaultTenantId: process.env.ARA_DEFAULT_TENANT_ID || "freelan",
   writeMode: process.env.ARA_WRITE_MODE || "disabled",
   externalServicesMode: process.env.ARA_EXTERNAL_SERVICES_MODE || "mock",
@@ -68,6 +75,28 @@ function parseBoolean(value, fallback) {
   return String(value).toLowerCase() === "true";
 }
 
+function parseOperatorUsers(value, fallbackEmail, fallbackPassword) {
+  const users = [];
+  if (fallbackEmail && fallbackPassword) {
+    users.push({ email: fallbackEmail, password: fallbackPassword });
+  }
+  if (value == null || String(value).trim() === "") return { users, error: "" };
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return { users, error: "ARA_OPERATOR_USERS_JSON must be a JSON array" };
+    for (const item of parsed) {
+      const email = normalizeSecret(item?.email)?.toLowerCase();
+      const password = normalizeSecret(item?.password);
+      if (!email || !password) return { users, error: "ARA_OPERATOR_USERS_JSON users require email and password" };
+      users.push({ email, password });
+    }
+    const deduped = [...new Map(users.map(user => [user.email, user])).values()];
+    return { users: deduped, error: "" };
+  } catch {
+    return { users, error: "ARA_OPERATOR_USERS_JSON must be valid JSON" };
+  }
+}
+
 export function assertConfig() {
   const validation = validateConfig();
   if (!validation.ok) throw new Error(`Invalid configuration: ${validation.errors.join(", ")}`);
@@ -85,12 +114,12 @@ export function validateConfig() {
     ["OPENAI_API_KEY", config.openaiKey],
     ["APPROVAL_CODE", config.approvalCode],
     ["ARA_ADMIN_TOKEN", config.adminToken],
-    ["ARA_OPERATOR_EMAIL", config.operatorEmail],
-    ["ARA_OPERATOR_PASSWORD", config.operatorPassword]
+    ["ARA_OPERATOR_CREDENTIALS", config.operatorUsers.length]
   ].filter(([, value]) => !value).map(([name]) => name);
 
   const errors = [];
   if (!WRITE_MODES.has(config.writeMode)) errors.push("ARA_WRITE_MODE must be disabled, preview, or enabled");
+  if (config.operatorUsersError) errors.push(config.operatorUsersError);
   if (!EXTERNAL_SERVICES_MODES.has(config.externalServicesMode)) errors.push("ARA_EXTERNAL_SERVICES_MODE must be mock, sandbox, or live");
   if (!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(config.defaultTenantId)) errors.push("ARA_DEFAULT_TENANT_ID must be a safe tenant identifier");
   for (const [name, value] of [

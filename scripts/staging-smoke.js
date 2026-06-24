@@ -22,6 +22,7 @@ const smokeConfig = {
   adminToken: "staging-smoke-token",
   operatorEmail: "operator@example.test",
   operatorPassword: "valid-password",
+  operatorUsers: [{ email: "operator@example.test", password: "valid-password" }],
   databaseUrl: "postgresql://localhost:5432/smoke",
   apolloKey: "mock-apollo-key",
   hubspotToken: "mock-hubspot-token",

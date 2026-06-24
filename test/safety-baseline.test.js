@@ -21,7 +21,9 @@ const original = {
   nodeEnv: config.nodeEnv,
   externalServicesMode: config.externalServicesMode,
   operatorEmail: config.operatorEmail,
-  operatorPassword: config.operatorPassword
+  operatorPassword: config.operatorPassword,
+  operatorUsers: config.operatorUsers,
+  operatorUsersError: config.operatorUsersError
 };
 
 test.afterEach(() => {
@@ -119,6 +121,7 @@ test("operator login creates session accepted by internal auth", () => {
   config.adminToken = "test-admin-token";
   config.operatorEmail = "antonio.rubio@freelan.com.mx";
   config.operatorPassword = "test-password";
+  config.operatorUsers = [{ email: config.operatorEmail, password: config.operatorPassword }];
   const result = createOperatorSession({
     email: "antonio.rubio@freelan.com.mx",
     password: "test-password"
@@ -146,6 +149,7 @@ test("configuration validation reports missing required names without values", (
   config.openaiKey = "";
   config.approvalCode = "";
   config.adminToken = "";
+  config.operatorUsers = [];
   const validation = validateConfig();
   assert.equal(validation.ok, false);
   assert.deepEqual(validation.missing, [
@@ -155,8 +159,7 @@ test("configuration validation reports missing required names without values", (
     "OPENAI_API_KEY",
     "APPROVAL_CODE",
     "ARA_ADMIN_TOKEN",
-    "ARA_OPERATOR_EMAIL",
-    "ARA_OPERATOR_PASSWORD"
+    "ARA_OPERATOR_CREDENTIALS"
   ]);
 });
 

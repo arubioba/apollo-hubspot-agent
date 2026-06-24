@@ -34,20 +34,22 @@ function verifySignedSession(token, now = Date.now()) {
   if (!payload || !signature || !safeEqual(signature, sign(payload))) return false;
   try {
     const body = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return body.email === config.operatorEmail && Number(body.exp) > now;
+    const activeOperator = config.operatorUsers.some(user => user.email === body.email);
+    return activeOperator && Number(body.exp) > now;
   } catch {
     return false;
   }
 }
 
 export function createOperatorSession({ email, password } = {}) {
-  if (!config.operatorEmail || !config.operatorPassword) {
+  if (!config.operatorUsers.length) {
     logger.warn("authorization.denied", "Operator credentials are not configured.");
     throw new AuthenticationError("Operator authentication is not configured.", { status: 503 });
   }
   const normalizedEmail = normalizeToken(email).toLowerCase();
   const normalizedPassword = normalizeToken(password);
-  if (!safeEqual(normalizedEmail, config.operatorEmail) || !safeEqual(normalizedPassword, config.operatorPassword)) {
+  const operator = config.operatorUsers.find(user => safeEqual(normalizedEmail, user.email));
+  if (!operator || !safeEqual(normalizedPassword, operator.password)) {
     logger.warn("authorization.denied", "Invalid operator credentials.");
     throw new AuthenticationError("Invalid operator credentials.");
   }

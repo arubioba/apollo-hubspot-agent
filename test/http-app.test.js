@@ -80,6 +80,7 @@ function makeApp(options = {}) {
   config.adminToken = "valid-token";
   config.operatorEmail = "operator@example.com";
   config.operatorPassword = "valid-password";
+  config.operatorUsers = options.operatorUsers || [{ email: config.operatorEmail, password: config.operatorPassword }];
   config.diagnosticsEnabled = options.diagnosticsEnabled ?? false;
   config.rateLimitEnabled = options.rateLimitEnabled ?? false;
   config.rateLimitMaxRequests = options.rateLimitMaxRequests ?? 60;
@@ -123,6 +124,32 @@ test("operator session token can access protected endpoints", async () => {
     headers: { "X-ARA-Session-Token": login.body.session.token }
   });
   assert.equal(response.status, 200);
+});
+
+test("multiple operator users can create sessions and access protected endpoints", async () => {
+  const { app } = makeApp({
+    operatorUsers: [
+      { email: "amaya.gutierrez@freelan.com.mx", password: "amaya-test-password" },
+      { email: "lourdes.cicero@freelan.com.mx", password: "lourdes-test-password" }
+    ]
+  });
+  for (const operator of [
+    { email: "amaya.gutierrez@freelan.com.mx", password: "amaya-test-password" },
+    { email: "lourdes.cicero@freelan.com.mx", password: "lourdes-test-password" }
+  ]) {
+    const login = await request(app, {
+      method: "POST",
+      url: "/api/session",
+      body: operator
+    });
+    assert.equal(login.status, 200);
+    assert.equal(login.body.session.operator_email, operator.email);
+    const response = await request(app, {
+      url: "/api/audit/latest-import",
+      headers: { "X-ARA-Session-Token": login.body.session.token }
+    });
+    assert.equal(response.status, 200);
+  }
 });
 
 test("operator session endpoint rejects invalid credentials", async () => {
