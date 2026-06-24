@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { ApolloError, ApolloRateLimitError, HubSpotError, ValidationError } from "./errors.js";
 import { logger } from "./logger.js";
 import { assertHubSpotWriteAllowed, isPreviewMode } from "./write-guard.js";
+import { getAraKnowledgeProfile } from "./ara-knowledge.js";
 
 async function request(url, options = {}) {
   const response = await fetch(url, options);
@@ -343,6 +344,7 @@ function buildIcpContext(candidate, filters) {
 
 function buildEngagementPrepNote(candidate, filters) {
   const company = candidate.company || {};
+  const araProfile = getAraKnowledgeProfile();
   const contactName = [candidate.firstName, candidate.lastName].filter(Boolean).join(" ") || candidate.contactName || candidate.email;
   const signals = filters.interpretation?.companyKeywords?.length
     ? filters.interpretation.companyKeywords.join(", ")
@@ -355,7 +357,9 @@ function buildEngagementPrepNote(candidate, filters) {
     `${company.name || candidate.companyName || "Empresa sin nombre"} (${company.domain || candidate.domain || "dominio no disponible"}) opera en el ICP solicitado: ${filters.industry}. Empleados objetivo: ${filters.employeeMin}-${filters.employeeMax}. Pais(es): ${(filters.countries || []).join(", ")}. Senales capturadas: ${signals}. Evidencia ARA: ${evidence}`,
     "",
     "Oportunidades potenciales - con base en el research y la propuesta de valor de Freelan.",
-    "Freelan puede ayudar a reducir friccion comercial, mejorar visibilidad de pipeline, elevar adopcion de HubSpot y conectar procesos de marketing, ventas y automatizacion con agentes de AI. Priorizar discovery sobre procesos manuales, calidad de CRM, seguimiento comercial y oportunidades de revenue automation.",
+    `Lente ARA/Freelan: ${araProfile.corePremise}`,
+    `Señales de oportunidad a validar: ${araProfile.opportunitySignals.slice(0, 5).join("; ")}.`,
+    `Servicios Freelan potencialmente relevantes: ${araProfile.servicePortfolio.slice(0, 4).join("; ")}.`,
     "",
     "Key Stake Holders",
     `Contacto principal: ${contactName} - ${candidate.title || candidate.jobTitle || "cargo no disponible"} (${candidate.email}).`,

@@ -8,6 +8,7 @@ import { maskEmail, maskPhone, sanitize } from "../src/logger.js";
 import { assertHubSpotWriteAllowed } from "../src/write-guard.js";
 import { buildApolloSearchPayload, ensureHubSpotProperties, findApolloCandidates, importCandidate, writeEngagementPrep } from "../src/clients.js";
 import { interpretFilters, verifyOpenAIConnection } from "../src/interpreter.js";
+import { getAraKnowledgeProfile } from "../src/ara-knowledge.js";
 
 const original = {
   adminToken: config.adminToken,
@@ -202,6 +203,13 @@ test("mock external services mode interprets filters without calling OpenAI", as
   assert.ok(interpretation.industryKeywords.includes("Retail"));
   assert.ok(interpretation.roleTitles.includes("Director Comercial"));
   assert.ok(interpretation.companyKeywords.includes("CRM"));
+});
+
+test("ARA knowledge profile is available to agents", () => {
+  const profile = getAraKnowledgeProfile();
+  assert.match(profile.corePremise, /systems|sistemas/i);
+  assert.ok(profile.opportunitySignals.length > 0);
+  assert.ok(profile.servicePortfolio.some(item => item.includes("Revenue Architecture Assessment")));
 });
 
 test("write guard blocks HubSpot writes in disabled mode", () => {
