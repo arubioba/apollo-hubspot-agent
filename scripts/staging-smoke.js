@@ -73,6 +73,22 @@ const app = createApp({
     verifyHubSpotConnection: async () => ({ ok: true }),
     verifyOpenAIConnection: async () => ({ ok: true }),
     latestImportAudit: async () => serializeAuditRun(sampleRun),
+    listCandidateInbox: async () => ({
+      pagination: { page: 1, page_size: 1, total: 1 },
+      candidates: [{
+        candidate_id: "candidate-smoke-1",
+        name: "Alicia Smoke",
+        company: "Smoke Example SA",
+        title: "CIO",
+        email: "alicia.smoke@example.test",
+        opportunity_score: 91,
+        lifecycle_status: "RECOMMENDED",
+        approval_status: "PENDING",
+        hubspot_sync_status: "pending",
+        next_action: "commercial_approval",
+        evidence: [{ code: "verified_email", message: "Email laboral verificado." }]
+      }]
+    }),
     listRunCandidates: async (_runId, query = {}) => serializeRunCandidates(sampleRun, {
       page: Math.max(1, Number(query.page || 1)),
       pageSize: Math.min(100, Math.max(1, Number(query.page_size || 25)))
@@ -197,6 +213,13 @@ try {
     assert.equal(response.body.candidates.length, 1);
     assert.equal(response.body.candidates[0].email, "alicia.smoke@example.test");
     assert.equal(response.text.includes("must_not_leak"), false);
+  });
+
+  await check("candidate inbox returns durable ARA candidate", async () => {
+    const response = await request({ url: "/api/candidates?run_id=smoke-run-1&page_size=1", headers: auth });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.candidates[0].candidate_id, "candidate-smoke-1");
+    assert.equal(response.body.candidates[0].opportunity_score, 91);
   });
 
   await check("write mode disabled blocks writes", async () => {

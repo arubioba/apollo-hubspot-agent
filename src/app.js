@@ -106,6 +106,7 @@ export function createApp({
     return serializeDiagnostic("openai", await handlers.verifyOpenAIConnection(), { enabled: true });
   }));
   app.get("/api/audit/latest-import", route(handlers.latestImportAudit));
+  app.get("/api/candidates", route(req => handlers.listCandidateInbox(req.query)));
   app.get("/api/import-runs/:runId/candidates", route(req => handlers.listRunCandidates(req.params.runId, req.query)));
   app.post("/api/setup/hubspot-properties", route(handlers.ensureHubSpotProperties));
   app.post("/api/runs", route(handlers.startRun));

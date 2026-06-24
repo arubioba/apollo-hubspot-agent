@@ -26,7 +26,62 @@ export async function initDb() {
       imported_count integer NOT NULL DEFAULT 0,
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS ara_candidates (
+      candidate_id uuid PRIMARY KEY,
+      tenant_id text NOT NULL,
+      campaign_id text NOT NULL,
+      run_id uuid NOT NULL REFERENCES import_runs(id),
+      source text NOT NULL,
+      apollo_person_id text,
+      apollo_organization_id text,
+      hubspot_contact_id text,
+      hubspot_company_id text,
+      contact_name text NOT NULL,
+      job_title text,
+      seniority text,
+      department text,
+      company_name text NOT NULL,
+      domain text NOT NULL,
+      country text,
+      industry text,
+      employee_range text,
+      professional_email text NOT NULL,
+      linkedin_url text,
+      company_icp_score numeric(5,2),
+      contact_relevance_score numeric(5,2),
+      opportunity_score numeric(5,2),
+      confidence numeric(5,4),
+      recommendation text NOT NULL,
+      positive_factors jsonb NOT NULL DEFAULT '[]'::jsonb,
+      negative_factors jsonb NOT NULL DEFAULT '[]'::jsonb,
+      commercial_signals jsonb NOT NULL DEFAULT '[]'::jsonb,
+      evidence jsonb NOT NULL DEFAULT '[]'::jsonb,
+      lifecycle_status text NOT NULL,
+      approval_status text NOT NULL,
+      hubspot_sync_status text NOT NULL,
+      enrichment_status text NOT NULL DEFAULT 'not_started',
+      context_status text NOT NULL DEFAULT 'not_started',
+      engagement_status text NOT NULL DEFAULT 'not_started',
+      next_action text NOT NULL,
+      assigned_owner text,
+      agent_version text,
+      scoring_version text,
+      rejection_reason text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      correlation_id text NOT NULL,
+      UNIQUE (tenant_id, professional_email, campaign_id)
+    );
     ALTER TABLE import_runs ADD COLUMN IF NOT EXISTS correlation_id text;
+    CREATE INDEX IF NOT EXISTS ara_candidates_tenant_status_idx
+      ON ara_candidates(tenant_id, lifecycle_status, approval_status);
+    CREATE INDEX IF NOT EXISTS ara_candidates_run_idx
+      ON ara_candidates(tenant_id, run_id);
+    CREATE INDEX IF NOT EXISTS ara_candidates_domain_idx
+      ON ara_candidates(tenant_id, domain);
+    CREATE INDEX IF NOT EXISTS ara_candidates_hubspot_contact_idx
+      ON ara_candidates(tenant_id, hubspot_contact_id)
+      WHERE hubspot_contact_id IS NOT NULL;
   `);
 }
 

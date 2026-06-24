@@ -13,6 +13,7 @@ export const envSpec = [
   { name: "OPENAI_MODEL", required: false, secret: false, environmentSpecific: false },
   { name: "APPROVAL_CODE", required: true, secret: true, environmentSpecific: true },
   { name: "ARA_ADMIN_TOKEN", required: true, secret: true, environmentSpecific: true },
+  { name: "ARA_DEFAULT_TENANT_ID", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_WRITE_MODE", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_EXTERNAL_SERVICES_MODE", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_DIAGNOSTICS_ENABLED", required: false, secret: false, environmentSpecific: true },
@@ -38,6 +39,7 @@ export const config = {
   openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   approvalCode: normalizeSecret(process.env.APPROVAL_CODE),
   adminToken: normalizeSecret(process.env.ARA_ADMIN_TOKEN),
+  defaultTenantId: process.env.ARA_DEFAULT_TENANT_ID || "freelan",
   writeMode: process.env.ARA_WRITE_MODE || "disabled",
   externalServicesMode: process.env.ARA_EXTERNAL_SERVICES_MODE || "mock",
   diagnosticsEnabled: parseBoolean(process.env.ARA_DIAGNOSTICS_ENABLED, false),
@@ -84,6 +86,7 @@ export function validateConfig() {
   const errors = [];
   if (!WRITE_MODES.has(config.writeMode)) errors.push("ARA_WRITE_MODE must be disabled, preview, or enabled");
   if (!EXTERNAL_SERVICES_MODES.has(config.externalServicesMode)) errors.push("ARA_EXTERNAL_SERVICES_MODE must be mock, sandbox, or live");
+  if (!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(config.defaultTenantId)) errors.push("ARA_DEFAULT_TENANT_ID must be a safe tenant identifier");
   for (const [name, value] of [
     ["ARA_DIAGNOSTICS_ENABLED", process.env.ARA_DIAGNOSTICS_ENABLED],
     ["ARA_RATE_LIMIT_ENABLED", process.env.ARA_RATE_LIMIT_ENABLED]
@@ -108,6 +111,7 @@ export function validateConfig() {
 export function getConfigSummary() {
   return [
     ["NODE_ENV", config.nodeEnv],
+    ["ARA_DEFAULT_TENANT_ID", config.defaultTenantId],
     ["ARA_WRITE_MODE", config.writeMode],
     ["ARA_EXTERNAL_SERVICES_MODE", config.externalServicesMode],
     ["OPENAI_MODEL", config.openaiModel],
