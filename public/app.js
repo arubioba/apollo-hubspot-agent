@@ -1,177 +1,318 @@
 let run;
 let selectedRoles = [];
 let adminToken = sessionStorage.getItem("araAdminToken") || "";
-const chat = document.querySelector("#chat");
-const form = document.querySelector("#filters");
-const actions = document.querySelector("#actions");
-const proposal = document.querySelector("#proposal");
 
-const say = text => chat.insertAdjacentHTML("beforeend", `<div class="msg">${escapeHtml(text)}</div>`);
-const call = async (path, body = {}, method = "POST") => {
+const $ = selector => document.querySelector(selector);
+const feed = $("#operator-feed");
+const form = $("#campaign-form");
+const actions = {
+  token: $("#token-button"),
+  newRun: $("#new-run"),
+  approveSearch: $("#approve-search"),
+  editFilters: $("#edit-filters"),
+  preview: $("#run-preview"),
+  import: $("#run-import")
+};
+
+const agents = [
+  ["orchestrator", "Revenue Orchestrator", "Coordina run, contexto y handoffs."],
+  ["discovery", "Discovery Agent", "Interpreta ICP y busca candidatos en Apollo."],
+  ["data", "Data Intelligence", "Normaliza, puntua y genera evidencia."],
+  ["account", "Account Intelligence", "Prepara contexto de empresa y dominio."],
+  ["hubspot", "HubSpot Sync", "Ejecuta preview o escritura controlada."],
+  ["engagement", "Engagement Prep", "Deja listo el contexto de prospeccion."]
+];
+
+async function boot() {
+  setSystem("Starting", "Inicializando consola ARA.");
+  renderTimeline("orchestrator", []);
+  await startRun();
+  bindEvents();
+  setSystem("Ready", "Consola lista para configurar una campana.");
+}
+
+async function startRun() {
+  clearFeed();
+  $("#candidate-table").innerHTML = emptyRow("Sin candidatos todavia. Configura un ICP y ejecuta Discovery.");
+  $("#candidate-summary").innerHTML = "";
+  $("#report").textContent = "Aun no hay ejecuciones.";
+  $("#interpretation-panel").hidden = true;
+  actions.preview.disabled = true;
+  actions.import.disabled = true;
+  const data = await call("/api/runs");
+  run = data.run;
+  selectedRoles = [];
+  $("#run-id").textContent = shortId(run.id);
+  $("#phase-pill").textContent = readablePhase(run.phase);
+  $("#role-options").innerHTML = data.suggestedRoles.map(role => `<option value="${escapeHtml(role)}">`).join("");
+  $("#campaign-form").reset();
+  $("#min").value = 50;
+  $("#max").value = 5000;
+  $("#countries").value = "Mexico, Colombia";
+  $("#quantity").value = 50;
+  renderRoles();
+  addFeed("Revenue Orchestrator", "Nuevo run creado. ARA esta esperando el ICP, roles y brief ad-hoc.");
+}
+
+function bindEvents() {
+  actions.token.onclick = () => {
+    adminToken = prompt("Token interno ARA", adminToken) || "";
+    sessionStorage.setItem("araAdminToken", adminToken);
+  };
+  actions.newRun.onclick = () => startRun().catch(showError);
+  actions.editFilters.onclick = () => {
+    $("#interpretation-panel").hidden = true;
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+    addFeed("Revenue Orchestrator", "Filtros desbloqueados. Ajusta el ICP y vuelve a interpretar.");
+  };
+  actions.approveSearch.onclick = () => search().catch(showError);
+  actions.preview.onclick = () => preview().catch(showError);
+  actions.import.onclick = () => finalImport().catch(showError);
+  $("#role-search").onchange = event => {
+    const role = event.target.value.trim();
+    if (role && selectedRoles.length < 3 && !selectedRoles.includes(role)) selectedRoles.push(role);
+    event.target.value = "";
+    renderRoles();
+  };
+  form.onsubmit = event => {
+    event.preventDefault();
+    analyze().catch(showError);
+  };
+}
+
+async function analyze() {
+  const body = readFilters();
+  setSystem("Analyzing", "Discovery Agent esta interpretando el ICP.");
+  renderTimeline("discovery", ["orchestrator"]);
+  addFeed("Discovery Agent", "Estoy traduciendo industria, roles y brief a filtros compatibles con Apollo.");
+  const data = await call(`/api/runs/${run.id}/analyze`, body);
+  run = data.run;
+  $("#phase-pill").textContent = readablePhase(run.phase);
+  renderInterpretation(data.interpretation);
+  $("#interpretation-panel").hidden = false;
+  addFeed("Data Intelligence", data.interpretation.explanation);
+  setSystem("Review", "Valida el plan antes de consumir Apollo.");
+}
+
+async function search() {
+  setSystem("Searching", "Discovery Agent esta consultando Apollo.");
+  renderTimeline("data", ["orchestrator", "discovery"]);
+  addFeed("Discovery Agent", "Busqueda aprobada. Ejecutando Apollo con email verificado, telefono valido y dominio de empresa.");
+  const data = await call(`/api/runs/${run.id}/approve-roles`);
+  run = data.run;
+  $("#phase-pill").textContent = readablePhase(run.phase);
+  if (!run.candidates.length) {
+    renderTimeline("discovery", ["orchestrator"]);
+    addFeed("Discovery Agent", `No encontre candidatos elegibles.\n${data.relaxationProposal?.explanation || "Sugiero relajar filtros opcionales."}`);
+    $("#candidate-table").innerHTML = emptyRow("No hubo candidatos con los filtros actuales.");
+    setSystem("Needs input", "Ajusta o relaja filtros.");
+    return;
+  }
+  addFeed("Data Intelligence", `Normalice ${run.candidates.length} candidatos y los guarde en Candidate Inbox.`);
+  await loadCandidates();
+  actions.preview.disabled = false;
+  actions.import.disabled = false;
+  renderTimeline("hubspot", ["orchestrator", "discovery", "data", "account"]);
+  setSystem("Candidates ready", "Revisa candidatos antes de sincronizar.");
+}
+
+async function preview() {
+  setSystem("Preview", "HubSpot Sync esta preparando prueba controlada.");
+  renderTimeline("hubspot", ["orchestrator", "discovery", "data", "account"]);
+  const data = await call(`/api/runs/${run.id}/test`);
+  run = data.run;
+  $("#phase-pill").textContent = readablePhase(run.phase);
+  renderReport("Preview de 5", data.message, run.testResults);
+  addFeed("HubSpot Sync", data.message);
+}
+
+async function finalImport(code) {
+  setSystem("Sync", "HubSpot Sync esta preparando la importacion.");
+  const data = await call(`/api/runs/${run.id}/import`, { approvalCode: code });
+  if (data.requiresApprovalCode) {
+    const approvalCode = prompt(data.message);
+    if (!approvalCode) return;
+    return finalImport(approvalCode);
+  }
+  run = data.run;
+  $("#phase-pill").textContent = readablePhase(run.phase);
+  renderReport("Importacion", data.message, run.finalResults);
+  addFeed("HubSpot Sync", data.message);
+  renderTimeline("engagement", ["orchestrator", "discovery", "data", "account", "hubspot"]);
+  setSystem("Complete", "Run terminado. Revisa reporte y HubSpot.");
+}
+
+async function loadCandidates() {
+  let data = await call(`/api/candidates?run_id=${encodeURIComponent(run.id)}&page_size=25`, {}, "GET");
+  if (!data.candidates?.length) data = await call(`/api/import-runs/${run.id}/candidates?page_size=25`, {}, "GET");
+  renderCandidateSummary(data);
+  renderCandidates(data.candidates || []);
+}
+
+function readFilters() {
+  return {
+    industry: $("#industry").value.trim(),
+    employeeMin: Number($("#min").value),
+    employeeMax: Number($("#max").value),
+    countries: $("#countries").value.split(",").map(value => value.trim()).filter(Boolean),
+    quantity: Number($("#quantity").value),
+    roles: selectedRoles,
+    adHocBrief: $("#ad-hoc").value.trim()
+  };
+}
+
+function renderRoles() {
+  $("#selected-roles").innerHTML = selectedRoles.map((role, index) =>
+    `<span class="chip">${escapeHtml(role)} <button type="button" data-remove="${index}" aria-label="Quitar ${escapeHtml(role)}">x</button></span>`
+  ).join("");
+  document.querySelectorAll("[data-remove]").forEach(button => {
+    button.onclick = () => {
+      selectedRoles.splice(Number(button.dataset.remove), 1);
+      renderRoles();
+    };
+  });
+}
+
+function renderInterpretation(value) {
+  $("#interpretation").innerHTML = [
+    insight("Industria y similares", value.industryKeywords),
+    insight("Titulos equivalentes", value.roleTitles),
+    insight("Seniorities", value.seniorities.length ? value.seniorities : ["Sin filtro adicional"]),
+    insight("Senales comerciales", value.companyKeywords.length ? value.companyKeywords : ["Se guardaran como contexto, no como filtro duro"]),
+    insight("Exclusiones", value.excludedTitles.length ? value.excludedTitles : ["Ninguna"]),
+    `<div class="insight full"><strong>Recomendacion de relajacion</strong>${escapeHtml(value.relaxation?.explanation || "Mantener filtros actuales.")}</div>`
+  ].join("");
+}
+
+function insight(label, values) {
+  return `<div class="insight"><strong>${escapeHtml(label)}</strong>${escapeHtml(values.join(", "))}</div>`;
+}
+
+function renderCandidateSummary(data) {
+  const items = data.candidates || [];
+  const recommended = items.filter(item => item.lifecycle_status === "RECOMMENDED").length;
+  const pending = items.filter(item => item.approval_status === "PENDING").length;
+  $("#candidate-summary").innerHTML = [
+    metric("Candidatos", data.pagination?.total ?? items.length),
+    metric("Recomendados", recommended),
+    metric("Pendientes", pending),
+    metric("Run", shortId(run.id))
+  ].join("");
+}
+
+function renderCandidates(items) {
+  if (!items.length) {
+    $("#candidate-table").innerHTML = emptyRow("No hay candidatos disponibles para este run.");
+    return;
+  }
+  $("#candidate-table").innerHTML = items.map(candidate => {
+    const evidence = (candidate.evidence || []).slice(0, 2).map(item => item.message || item.code).filter(Boolean).join("; ");
+    return `<tr>
+      <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "")}</span></td>
+      <td>${escapeHtml(candidate.company || "")}<span class="candidate-meta">${escapeHtml(candidate.title || "")}</span></td>
+      <td><span class="score">${escapeHtml(candidate.opportunity_score ?? candidate.icp_score ?? "-")}</span></td>
+      <td>${escapeHtml(candidate.lifecycle_status || candidate.status || "candidate")}<span class="candidate-meta">${escapeHtml(candidate.approval_status || "")}</span></td>
+      <td>${escapeHtml(evidence || candidate.recommendation || "Sin evidencia visible")}</td>
+      <td>${escapeHtml(candidate.next_action || "commercial_approval")}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderTimeline(active, done = []) {
+  document.querySelectorAll(".agent").forEach(button => {
+    button.classList.toggle("active", button.dataset.agent === active);
+  });
+  $("#timeline").innerHTML = agents.map(([key, name, detail]) => {
+    const status = key === active ? "active" : done.includes(key) ? "done" : "";
+    return `<li class="${status}"><span></span><div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(detail)}</small></div></li>`;
+  }).join("");
+}
+
+function renderReport(title, message, results = {}) {
+  const successful = results.successful || [];
+  const failed = results.failed || [];
+  $("#report").innerHTML = `<strong>${escapeHtml(title)}</strong>
+    <pre>${escapeHtml(message)}
+
+Exitosos: ${successful.length}
+Fallidos: ${failed.length}
+${failed.map(item => `${item.email}: ${item.error}`).join("\n")}</pre>`;
+}
+
+function addFeed(agent, text, type = "info") {
+  feed.insertAdjacentHTML("afterbegin", `<div class="feed-entry ${type}"><strong>${escapeHtml(agent)}</strong>\n${escapeHtml(text)}</div>`);
+}
+
+function clearFeed() {
+  feed.innerHTML = "";
+}
+
+function showError(error) {
+  const correlation = error.correlationId ? `\nCorrelation ID: ${error.correlationId}` : "";
+  addFeed("ARA", `${error.message}${correlation}`, "error");
+  setSystem("Attention", "Revisa el mensaje de error.");
+}
+
+async function call(path, body = {}, method = "POST") {
   if (!adminToken) {
     adminToken = prompt("Token interno ARA") || "";
     sessionStorage.setItem("araAdminToken", adminToken);
   }
   const response = await fetch(path, {
     method,
-    headers:{"Content-Type":"application/json", "X-ARA-Admin-Token": adminToken},
+    headers: { "Content-Type": "application/json", "X-ARA-Admin-Token": adminToken },
     body: method === "GET" ? undefined : JSON.stringify(body)
   });
-  const data = await response.json();
+  const data = await safeJson(response);
   if (!response.ok) {
     const message = data.error?.message || "No se pudo completar la operacion.";
-    const suffix = data.correlation_id ? ` Correlation ID: ${data.correlation_id}` : "";
-    const error = new Error(`${message}.${suffix}`);
+    const error = new Error(message);
     error.code = data.error?.code;
-    error.correlationId = data.correlation_id;
+    error.correlationId = data.correlation_id || data.correlationId;
     throw error;
   }
   return data;
-};
-const button = (label, fn) => {
-  const el = document.createElement("button"); el.textContent = label; el.onclick = fn; actions.append(el);
-};
-
-async function boot() {
-  chat.innerHTML = ""; actions.innerHTML = ""; proposal.hidden = true;
-  const data = await call("/api/runs");
-  run = data.run; say(data.message);
-  const options = document.querySelector("#role-options");
-  options.innerHTML = data.suggestedRoles.map(x => `<option value="${escapeHtml(x)}">`).join("");
-  selectedRoles = [];
-  renderRoles();
-  form.reset();
-  document.querySelector("#min").value = 50;
-  document.querySelector("#max").value = 5000;
-  document.querySelector("#countries").value = "Mexico, Colombia";
-  document.querySelector("#quantity").value = 50;
-  form.hidden = false;
 }
 
-document.querySelector("#role-search").addEventListener("change", event => {
-  const role = event.target.value.trim();
-  if (role && selectedRoles.length < 3 && !selectedRoles.includes(role)) selectedRoles.push(role);
-  event.target.value = "";
-  renderRoles();
-});
-
-function renderRoles() {
-  document.querySelector("#selected-roles").innerHTML = selectedRoles.map((role, index) =>
-    `<span class="chip">${escapeHtml(role)} <button type="button" data-remove="${index}">×</button></span>`).join("");
-  document.querySelectorAll("[data-remove]").forEach(el => el.onclick = () => {
-    selectedRoles.splice(Number(el.dataset.remove), 1); renderRoles();
-  });
-}
-
-form.onsubmit = async event => {
-  event.preventDefault();
+async function safeJson(response) {
+  const text = await response.text();
+  if (!text) return {};
   try {
-    const body = {
-      industry: document.querySelector("#industry").value,
-      employeeMin: Number(document.querySelector("#min").value),
-      employeeMax: Number(document.querySelector("#max").value),
-      countries: document.querySelector("#countries").value.split(",").map(x=>x.trim()).filter(Boolean),
-      quantity: Number(document.querySelector("#quantity").value),
-      roles: selectedRoles,
-      adHocBrief: document.querySelector("#ad-hoc").value
-    };
-    say("Interpretando industria, roles y parámetros ad-hoc...");
-    const data = await call(`/api/runs/${run.id}/analyze`, body);
-    run = data.run; form.hidden = true; showProposal(data.interpretation); say(data.message);
-  } catch(error) { say(`Error: ${error.message}`); }
-};
-
-function showProposal(value) {
-  proposal.hidden = false;
-  proposal.innerHTML = `
-    <h3>Interpretación propuesta</h3>
-    <p>${escapeHtml(value.explanation)}</p>
-    <p><strong>Industria y similares:</strong> ${escapeHtml(value.industryKeywords.join(", "))}</p>
-    <p><strong>Títulos equivalentes:</strong> ${escapeHtml(value.roleTitles.join(", "))}</p>
-    <p><strong>Seniorities:</strong> ${escapeHtml(value.seniorities.join(", ") || "Sin filtro adicional")}</p>
-    <p><strong>Palabras clave:</strong> ${escapeHtml(value.companyKeywords.join(", ") || "Sin filtro adicional")}</p>
-    <p><strong>Exclusiones:</strong> ${escapeHtml(value.excludedTitles.join(", ") || "Ninguna")}</p>`;
-  actions.innerHTML = "";
-  button("Aprobar interpretación y buscar", search);
-  button("Modificar filtros", modify);
-  button("Nueva búsqueda", boot);
-}
-
-async function search() {
-  actions.innerHTML = "";
-  try {
-    const data = await call(`/api/runs/${run.id}/approve-roles`);
-    run = data.run; say(data.message);
-    if (!run.candidates.length) {
-      say(`Propuesta de relajación: ${data.relaxationProposal?.explanation || "Retirar filtros opcionales."}`);
-      button("Aprobar relajación y buscar otra vez", relax);
-      button("Modificar filtros", modify);
-      return;
-    }
-    await renderRunCandidates(run.id);
-    button("Ejecutar prueba de 5", test);
-    button("Modificar filtros", modify);
-    button("Nueva búsqueda", boot);
-  } catch(error) { say(`Error: ${error.message}`); button("Modificar filtros", modify); }
-}
-
-async function relax() {
-  actions.innerHTML = "";
-  try {
-    const data = await call(`/api/runs/${run.id}/relax`);
-    run = data.run; say(data.message);
-    if (run.candidates.length) { await renderRunCandidates(run.id); button("Ejecutar prueba de 5", test); }
-    else { say("La relajación aprobada tampoco encontró candidatos."); button("Modificar filtros", modify); }
-    button("Nueva búsqueda", boot);
-  } catch(error) { say(`Error: ${error.message}`); }
-}
-
-function modify() {
-  form.hidden = false; proposal.hidden = true; actions.innerHTML = "";
-  say("Modifica los filtros y vuelve a interpretar antes de buscar.");
-}
-
-async function test() {
-  actions.innerHTML="";
-  try {
-    const data=await call(`/api/runs/${run.id}/test`); run=data.run; say(data.message); renderReport(run.testResults);
-    button("Ya verifiqué HubSpot. Continuar importación", () => finalImport());
-    button("Nueva búsqueda", boot);
-  } catch(error){ say(`Error: ${error.message}`); }
-}
-async function finalImport(code) {
-  actions.innerHTML="";
-  try {
-    const data=await call(`/api/runs/${run.id}/import`, {approvalCode:code});
-    if(data.requiresApprovalCode) {
-      say(data.message);
-      const input=document.createElement("input"); input.type="password"; input.placeholder="Código de aprobación"; actions.append(input);
-      button("Autorizar importación", ()=>finalImport(input.value)); return;
-    }
-    run=data.run; say(data.message); renderReport(run.finalResults);
-    if(data.missing>0) button("Buscar e integrar faltantes", search);
-    button("Nueva búsqueda", boot);
-  } catch(error){ say(`Error: ${error.message}`); }
-}
-async function renderRunCandidates(runId) {
-  try {
-    let data = await call(`/api/candidates?run_id=${encodeURIComponent(runId)}&page_size=5`, {}, "GET");
-    if (!data.candidates?.length) data = await call(`/api/import-runs/${runId}/candidates?page_size=5`, {}, "GET");
-    renderCandidates(data.candidates || []);
-  } catch(error) {
-    say(`No pude cargar candidatos: ${error.message}`);
-    renderCandidates(run.candidates.slice(0,5));
+    return JSON.parse(text);
+  } catch {
+    return { error: { message: "Respuesta no valida del servidor." } };
   }
 }
-function renderCandidates(items){
-  say(items.map(x => {
-    const name = x.name || `${x.firstName || ""} ${x.lastName || ""}`.trim();
-    const company = x.company?.name || x.company || "";
-    const score = x.opportunity_score ?? x.icp_score ?? "";
-    const evidence = (x.evidence || []).slice(0, 2).map(item => item.message || item.code).filter(Boolean).join("; ");
-    return `${name} | ${x.title || ""} | ${company} | ${x.email || ""} | Score: ${score} | Estado: ${x.lifecycle_status || x.status || "candidate"} | Siguiente: ${x.next_action || "commercial_approval"}${evidence ? ` | Evidencia: ${evidence}` : ""}`;
-  }).join("\n"));
+
+function metric(label, value) {
+  return `<div class="metric"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
 }
-function renderReport(r){ say(`Exitosos: ${r.successful?.length||0}\nFallidos: ${r.failed?.length||0}\n${(r.failed||[]).map(x=>`${x.email}: ${x.error}`).join("\n")}`); }
-function escapeHtml(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-boot().catch(e=>say(`No se pudo iniciar: ${e.message}`));
+
+function emptyRow(message) {
+  return `<tr><td colspan="6" class="empty">${escapeHtml(message)}</td></tr>`;
+}
+
+function setSystem(state, detail) {
+  $("#system-state").textContent = state;
+  $("#system-detail").textContent = detail;
+}
+
+function readablePhase(value = "idle") {
+  return value.replaceAll("_", " ");
+}
+
+function shortId(value = "") {
+  return value ? value.slice(0, 8) : "No run";
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+boot().catch(showError);

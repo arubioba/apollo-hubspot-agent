@@ -6,7 +6,7 @@ import { requireInternalAuth } from "../src/auth.js";
 import { AuthenticationError, HubSpotWriteBlockedError } from "../src/errors.js";
 import { maskEmail, maskPhone, sanitize } from "../src/logger.js";
 import { assertHubSpotWriteAllowed } from "../src/write-guard.js";
-import { ensureHubSpotProperties, findApolloCandidates, importCandidate } from "../src/clients.js";
+import { buildApolloSearchPayload, ensureHubSpotProperties, findApolloCandidates, importCandidate } from "../src/clients.js";
 
 const original = {
   adminToken: config.adminToken,
@@ -197,6 +197,62 @@ test("Apollo search returns eligible mocked candidates", async () => {
   const candidates = await findApolloCandidates(searchFilters());
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].email, "ana@example.com");
+});
+
+test("Apollo payload uses only current console filters and approved expansions", () => {
+  const payload = buildApolloSearchPayload({
+    employeeMin: 50,
+    employeeMax: 5000,
+    countries: ["Mexico", "Colombia"],
+    roles: ["Director Comercial"],
+    adHocBrief: "exclude current customers and prioritize CRM",
+    interpretation: {
+      industryKeywords: ["Manufacturing"],
+      roleTitles: ["Director Comercial", "Commercial Director"],
+      seniorities: ["director"],
+      contactLocations: ["Monterrey"],
+      companyKeywords: ["CRM", "manual sales"],
+      excludedTitles: ["Assistant"]
+    }
+  }, "Manufacturing", 2);
+
+  assert.deepEqual(payload, {
+    page: 2,
+    per_page: 100,
+    organization_num_employees_ranges: ["50,5000"],
+    organization_locations: ["Mexico", "Colombia"],
+    q_organization_keyword_tags: ["Manufacturing"],
+    person_titles: ["Director Comercial", "Commercial Director"],
+    person_seniorities: ["director"],
+    include_similar_titles: true,
+    contact_email_status: ["verified"]
+  });
+  assert.equal("person_locations" in payload, false);
+  assert.equal("excludedTitles" in payload, false);
+  assert.equal("companyKeywords" in payload, false);
+});
+
+test("inferred title exclusions do not reject otherwise eligible Apollo candidates", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    people: [{
+      id: "apollo-3",
+      first_name: "Ana",
+      last_name: "Diaz",
+      email: "ana@example.com",
+      email_status: "verified",
+      title: "Assistant Commercial Director",
+      phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
+      organization: { name: "Example", primary_domain: "example.com" }
+    }]
+  }), { status: 200 });
+  const candidates = await findApolloCandidates({
+    ...searchFilters(),
+    interpretation: {
+      ...searchFilters().interpretation,
+      excludedTitles: ["Assistant"]
+    }
+  });
+  assert.equal(candidates.length, 1);
 });
 
 test("candidate without mappable phone is rejected by current filter", async () => {
