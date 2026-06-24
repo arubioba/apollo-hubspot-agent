@@ -90,6 +90,7 @@ function bindEvents() {
 }
 
 async function analyze() {
+  await ensureRun();
   const body = readFilters();
   setSystem("Analyzing", "Discovery Agent esta interpretando el ICP.");
   renderTimeline("discovery", ["orchestrator"]);
@@ -104,6 +105,7 @@ async function analyze() {
 }
 
 async function search() {
+  await ensureRun();
   setSystem("Searching", "Discovery Agent esta consultando Apollo.");
   renderTimeline("data", ["orchestrator", "discovery"]);
   addFeed("Discovery Agent", "Busqueda aprobada. Ejecutando Apollo con email verificado, telefono valido y dominio de empresa.");
@@ -126,6 +128,7 @@ async function search() {
 }
 
 async function preview() {
+  await ensureRun();
   setSystem("Preview", "HubSpot Sync esta preparando prueba controlada.");
   renderTimeline("hubspot", ["orchestrator", "discovery", "data", "account"]);
   const data = await call(`/api/runs/${run.id}/test`);
@@ -136,6 +139,7 @@ async function preview() {
 }
 
 async function finalImport(code) {
+  await ensureRun();
   setSystem("Sync", "HubSpot Sync esta preparando la importacion.");
   const data = await call(`/api/runs/${run.id}/import`, { approvalCode: code });
   if (data.requiresApprovalCode) {
@@ -152,10 +156,19 @@ async function finalImport(code) {
 }
 
 async function loadCandidates() {
+  await ensureRun();
   let data = await call(`/api/candidates?run_id=${encodeURIComponent(run.id)}&page_size=25`, {}, "GET");
   if (!data.candidates?.length) data = await call(`/api/import-runs/${run.id}/candidates?page_size=25`, {}, "GET");
   renderCandidateSummary(data);
   renderCandidates(data.candidates || []);
+}
+
+async function ensureRun() {
+  if (run?.id) return run;
+  addFeed("Revenue Orchestrator", "No habia un run activo. Estoy creando uno nuevo antes de continuar.");
+  await startRun();
+  if (!run?.id) throw new Error("No pude inicializar un run. Verifica el token y reintenta.");
+  return run;
 }
 
 function readFilters() {
