@@ -236,7 +236,7 @@ try {
   await check("UI is accessible", async () => {
     const response = await request({ url: "/" });
     assert.equal(response.status, 200);
-    assert.equal(response.text.includes("ARA Operator Console"), true);
+    assert.equal(response.text.includes("Freelan Revenue Console"), true);
   });
 
   await check("no external Apollo or HubSpot calls were made", async () => {
