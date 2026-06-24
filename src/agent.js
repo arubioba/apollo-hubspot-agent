@@ -1,13 +1,13 @@
 import crypto from "node:crypto";
 import { config } from "./config.js";
-import { ensureHubSpotProperties, findApolloCandidates, importCandidate } from "./clients.js";
+import { ensureHubSpotProperties, findApolloCandidates, importCandidate, writeEngagementPrep } from "./clients.js";
 import { interpretFilters } from "./interpreter.js";
 import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db.js";
 import { getCorrelationId } from "./context.js";
 import { ValidationError } from "./errors.js";
 import { logger } from "./logger.js";
 import { toAraCandidate } from "./candidate-adapter.js";
-import { markAraCandidateHubSpotSynced, upsertAraCandidates } from "./candidate-repository.js";
+import { markAraCandidateEngagementPrepared, markAraCandidateHubSpotSynced, upsertAraCandidates } from "./candidate-repository.js";
 
 const ICP_ROLES = [
   "CIO", "CTO", "Director de Tecnologia", "Chief Marketing Officer", "CMO",
@@ -163,6 +163,46 @@ export async function executeFinal(id, approvalCode, selectedEmails = []) {
     message: missing > 0
       ? `Se integraron ${run.finalResults.successful.length}. Fallaron o faltaron ${missing}. Puedes solicitar completar los faltantes.`
       : `Se integraron correctamente los ${requested} contactos solicitados.`
+  };
+}
+
+export async function prepareEngagement(id, selectedEmails = []) {
+  const run = await requiredRun(id);
+  const selected = selectedCandidates(run, selectedEmails);
+  if (!selected.length) throw new ValidationError("Selecciona al menos un candidato para preparar Engagement Prep.");
+  const synced = new Set([
+    ...(run.testResults?.successful || []),
+    ...(run.finalResults?.successful || [])
+  ].filter(item => !item.preview).map(item => item.email?.toLowerCase()).filter(Boolean));
+  const batch = selected.filter(candidate => synced.has(candidate.email.toLowerCase()));
+  if (!batch.length) throw new ValidationError("Engagement Prep requiere contactos ya sincronizados con HubSpot.");
+  if (config.writeMode === "enabled") await ensureHubSpotProperties();
+  const results = { successful: [], failed: [] };
+  for (const candidate of batch) {
+    try {
+      const result = await writeEngagementPrep(candidate, filtersWithRunContext(run));
+      results.successful.push(result);
+      if (!result.preview) {
+        await markAraCandidateEngagementPrepared({
+          tenantId: config.defaultTenantId,
+          runId: run.id,
+          email: candidate.email
+        });
+      }
+    } catch (error) {
+      logger.error("engagement_prep.failed", "Engagement Prep failed.", { email: candidate.email, error });
+      results.failed.push({ email: candidate.email, error: error.message });
+    }
+  }
+  run.engagementResults = results;
+  run.phase = "engagement_ready";
+  await saveRun(run);
+  return {
+    run,
+    results,
+    message: config.writeMode === "preview"
+      ? `Preview de Engagement Prep terminado para ${results.successful.length} contacto(s). No se escribio en HubSpot.`
+      : `Engagement Prep listo en HubSpot para ${results.successful.length} contacto(s).`
   };
 }
 

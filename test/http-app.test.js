@@ -50,6 +50,7 @@ function makeHandlers(overrides = {}) {
     applyRelaxation: async () => ({ run: { id: "run-1", candidates: [] }, message: "relaxed" }),
     executeTest: async () => ({ run: { id: "run-1" }, message: "Preview terminado. No se escribio en HubSpot." }),
     executeFinal: async () => ({ run: { id: "run-1" }, missing: 0, message: "Preview terminado." }),
+    prepareEngagement: async () => ({ run: { id: "run-1" }, results: { successful: [], failed: [] }, message: "Engagement Prep listo." }),
     listCandidateInbox: async () => ({
       pagination: { page: 1, page_size: 25, total: 1 },
       candidates: [{
@@ -340,6 +341,28 @@ test("HubSpot sync endpoints receive only selected candidate emails", async () =
   });
   assert.deepEqual(observed.preview, selected);
   assert.deepEqual(observed.import, { approvalCode: "code-1", selectedEmails: selected });
+});
+
+test("Engagement Prep endpoint receives selected candidate emails", async () => {
+  const selected = ["ana@example.com"];
+  let observed;
+  const { app } = makeApp({
+    handlers: {
+      prepareEngagement: async (_id, selectedEmails) => {
+        observed = selectedEmails;
+        return { run: { id: "run-1" }, results: { successful: [{ email: selected[0] }], failed: [] }, message: "ready" };
+      }
+    }
+  });
+  const response = await request(app, {
+    method: "POST",
+    url: "/api/runs/run-1/engagement-prep",
+    headers: { "X-ARA-Admin-Token": "valid-token" },
+    body: { selectedEmails: selected }
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(observed, selected);
+  assert.equal(response.body.message, "ready");
 });
 
 test("validation error returns controlled 400", async () => {

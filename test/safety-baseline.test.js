@@ -6,7 +6,7 @@ import { createOperatorSession, requireInternalAuth } from "../src/auth.js";
 import { AuthenticationError, HubSpotWriteBlockedError } from "../src/errors.js";
 import { maskEmail, maskPhone, sanitize } from "../src/logger.js";
 import { assertHubSpotWriteAllowed } from "../src/write-guard.js";
-import { buildApolloSearchPayload, ensureHubSpotProperties, findApolloCandidates, importCandidate } from "../src/clients.js";
+import { buildApolloSearchPayload, ensureHubSpotProperties, findApolloCandidates, importCandidate, writeEngagementPrep } from "../src/clients.js";
 import { interpretFilters, verifyOpenAIConnection } from "../src/interpreter.js";
 
 const original = {
@@ -221,6 +221,31 @@ test("preview mode returns planned properties without calling fetch", async () =
   assert.equal(result.email, "ana@example.com");
   assert.equal(result.contactProperties.hs_whatsapp_phone_number, "+525511112222");
   assert.equal(called, false);
+});
+
+test("preview mode returns Engagement Prep notes without calling HubSpot", async () => {
+  config.writeMode = "preview";
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    throw new Error("fetch should not be called");
+  };
+  const result = await writeEngagementPrep(candidate(), {
+    ...filters(),
+    employeeMin: 50,
+    employeeMax: 5000,
+    countries: ["Mexico"],
+    roles: ["CIO"],
+    interpretation: {
+      industryKeywords: ["Banking"],
+      companyKeywords: ["CRM"],
+      explanation: "match"
+    }
+  });
+  assert.equal(result.preview, true);
+  assert.equal(called, false);
+  assert.match(result.contactProperties.ara_engagement_prep_notes, /Contexto de la empresa/);
+  assert.match(result.contactProperties.ara_engagement_prep_notes, /Recomendaciones de approach/);
 });
 
 test("disabled mode blocks import before any real API call", async () => {

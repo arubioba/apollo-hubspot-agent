@@ -171,8 +171,13 @@ async function finalImport(code) {
 async function engagementPrep() {
   const selected = selectedCandidateList();
   if (!selected.length) throw new Error("Selecciona al menos un candidato para preparar Engagement Prep.");
-  addFeed("Engagement Prep", `Siguiente fase: preparar contexto y secuencia para ${selected.length} contacto(s) seleccionados. Aun no ejecuta acciones automaticas.`);
-  setSystem("Engagement queued", "Engagement Prep sera por contacto seleccionado en la siguiente iteracion.");
+  setSystem("Engagement Prep", "Preparando notas comerciales en HubSpot.");
+  const data = await call(`/api/runs/${run.id}/engagement-prep`, { selectedEmails: selected });
+  run = data.run;
+  renderReport("Engagement Prep", data.message, data.results);
+  addFeed("Engagement Prep", data.message);
+  renderTimeline("engagement", ["orchestrator", "discovery", "data", "account", "hubspot"]);
+  await loadCandidates(false);
 }
 
 async function loadCandidates(resetSelection = true) {
@@ -180,7 +185,6 @@ async function loadCandidates(resetSelection = true) {
   let data = await call(`/api/candidates?run_id=${encodeURIComponent(run.id)}&page_size=25`, {}, "GET");
   if (!data.candidates?.length) data = await call(`/api/import-runs/${run.id}/candidates?page_size=25`, {}, "GET");
   if (resetSelection) setDefaultCandidateSelection(data.candidates || []);
-  else pruneSyncedCandidates(data.candidates || []);
   renderCandidateSummary(data);
   renderCandidates(data.candidates || []);
 }
@@ -254,17 +258,16 @@ function renderCandidates(items) {
   $("#candidate-table").innerHTML = items.map(candidate => {
     const evidence = (candidate.evidence || []).slice(0, 3).map(item => item.message || item.code).filter(Boolean).join("; ");
     const email = candidate.email || "";
-    const selectable = candidate.hubspot_sync_status !== "synced";
-    const checked = selectedCandidateEmails.has(email.toLowerCase()) && selectable ? "checked" : "";
-    const disabled = selectable ? "" : "disabled";
+    const synced = candidate.hubspot_sync_status === "synced";
+    const checked = selectedCandidateEmails.has(email.toLowerCase()) ? "checked" : "";
     return `<tr>
-      <td><input class="candidate-select" type="checkbox" data-email="${escapeHtml(email)}" ${checked} ${disabled}></td>
+      <td><input class="candidate-select" type="checkbox" data-email="${escapeHtml(email)}" ${checked}></td>
       <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "")}</span></td>
       <td>${escapeHtml(candidate.company || "")}<span class="candidate-meta">${escapeHtml(candidate.title || "")}</span></td>
       <td><span class="score">${escapeHtml(candidate.opportunity_score ?? candidate.icp_score ?? "-")}</span></td>
       <td>${escapeHtml(candidate.lifecycle_status || candidate.status || "candidate")}<span class="candidate-meta">${escapeHtml(candidate.approval_status || "")}</span></td>
       <td>${escapeHtml(evidence || candidate.recommendation || "Sin evidencia visible")}</td>
-      <td>${selectable ? "Seleccionar para HubSpot" : "Sincronizado"}</td>
+      <td>${synced ? "Listo para Engagement Prep" : "Seleccionar para HubSpot"}</td>
     </tr>`;
   }).join("");
   document.querySelectorAll(".candidate-select").forEach(input => {
@@ -304,14 +307,6 @@ function setDefaultCandidateSelection(candidates) {
     .filter(candidate => candidate.lifecycle_status === "RECOMMENDED" && candidate.hubspot_sync_status !== "synced")
     .map(candidate => candidate.email?.toLowerCase())
     .filter(Boolean));
-}
-
-function pruneSyncedCandidates(candidates) {
-  candidates
-    .filter(candidate => candidate.hubspot_sync_status === "synced")
-    .map(candidate => candidate.email?.toLowerCase())
-    .filter(Boolean)
-    .forEach(email => selectedCandidateEmails.delete(email));
 }
 
 function selectedCandidateList() {
