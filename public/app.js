@@ -227,7 +227,8 @@ function renderInterpretation(value) {
     insight("Titulos equivalentes", value.roleTitles),
     insight("Seniorities", value.seniorities.length ? value.seniorities : ["Sin filtro adicional"]),
     insight("Senales comerciales", value.companyKeywords.length ? value.companyKeywords : ["Se guardaran como contexto, no como filtro duro"]),
-    insight("Exclusiones", value.excludedTitles.length ? value.excludedTitles : ["Ninguna"]),
+    insight("Exclusiones de empresa/tecnologia", value.excludedCompanyKeywords?.length ? value.excludedCompanyKeywords : ["Ninguna"]),
+    insight("Cargos excluidos", value.excludedTitles.length ? value.excludedTitles : ["Ninguno"]),
     `<div class="insight full"><strong>Recomendacion de relajacion</strong>${escapeHtml(value.relaxation?.explanation || "Mantener filtros actuales.")}</div>`
   ].join("");
 }

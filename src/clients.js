@@ -64,7 +64,7 @@ export async function findApolloCandidates(filters, page = 1) {
       const data = await apollo("/contacts/search", payload);
       results.push(...(data.people || data.contacts || []));
     }
-    const candidates = normalizeAndFilterCandidates(results);
+    const candidates = normalizeAndFilterCandidates(results, filters);
     if (candidates.length) return candidates;
   }
   return [];
@@ -128,7 +128,11 @@ function unique(items) {
   return [...new Set(items.map(item => String(item || "").trim()).filter(Boolean))];
 }
 
-function normalizeAndFilterCandidates(results) {
+function normalizeText(value = "") {
+  return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeAndFilterCandidates(results, filters = {}) {
   return [...new Map(results.map(person => [person.id, person])).values()].map(person => {
     const candidate = normalizeCandidate(person);
     logger.debug("candidate.normalized", "Candidate normalized.", { email: candidate.email, apolloId: candidate.apolloId });
@@ -138,6 +142,11 @@ function normalizeAndFilterCandidates(results) {
       const accepted = c.emailVerified && c.company.domain && c.validPhones.some(isMappableContactPhone);
       if (!accepted) logger.debug("candidate.rejected", "Candidate rejected by eligibility filters.", { email: c.email, title: c.title });
       return accepted;
+    })
+    .filter(c => {
+      const rejected = companyMatchesExcludedKeywords(c, filters.interpretation?.excludedCompanyKeywords || []);
+      if (rejected) logger.debug("candidate.rejected", "Candidate rejected by company exclusion filters.", { email: c.email, company: c.company.name });
+      return !rejected;
     });
 }
 
@@ -181,6 +190,12 @@ function getIndustrySearchTerms(filters) {
 export function normalizeCandidate(person) {
   const organization = person.organization || person.account || {};
   const phones = person.phone_numbers || [];
+  const organizationSignals = unique([
+    ...(organization.keywords || []),
+    ...(organization.technologies || []),
+    ...(organization.current_technologies || []),
+    ...(organization.technology_names || [])
+  ].map(signalToText));
   return {
     apolloId: person.id,
     firstName: person.first_name || "",
@@ -204,9 +219,27 @@ export function normalizeCandidate(person) {
       zip: organization.postal_code || "",
       linkedin: organization.linkedin_url || "",
       employees: organization.estimated_num_employees || organization.num_employees || null,
-      keywords: organization.keywords || []
+      keywords: organizationSignals
     }
   };
+}
+
+function signalToText(value) {
+  if (typeof value === "string") return value;
+  return value?.name || value?.technology_name || value?.title || value?.value || "";
+}
+
+function companyMatchesExcludedKeywords(candidate, excludedKeywords = []) {
+  const exclusions = excludedKeywords.map(normalizeText).filter(Boolean);
+  if (!exclusions.length) return false;
+  const company = candidate.company || {};
+  const haystack = normalizeText([
+    company.name,
+    company.domain,
+    company.website,
+    ...(company.keywords || [])
+  ].join(" "));
+  return exclusions.some(term => haystack.includes(term));
 }
 
 function isMappableContactPhone(phone) {

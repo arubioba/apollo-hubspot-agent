@@ -9,6 +9,7 @@ const schema = {
     seniorities: { type: "array", items: { type: "string" }, maxItems: 5 },
     companyKeywords: { type: "array", items: { type: "string" }, maxItems: 8 },
     contactLocations: { type: "array", items: { type: "string" }, maxItems: 8 },
+    excludedCompanyKeywords: { type: "array", items: { type: "string" }, maxItems: 8 },
     excludedTitles: { type: "array", items: { type: "string" }, maxItems: 8 },
     explanation: { type: "string" },
     relaxation: {
@@ -23,7 +24,7 @@ const schema = {
       required: ["removeCompanyKeywords", "broadenEmployeeRangeByPercent", "removeContactLocations", "explanation"]
     }
   },
-  required: ["industryKeywords", "roleTitles", "seniorities", "companyKeywords", "contactLocations", "excludedTitles", "explanation", "relaxation"]
+  required: ["industryKeywords", "roleTitles", "seniorities", "companyKeywords", "contactLocations", "excludedCompanyKeywords", "excludedTitles", "explanation", "relaxation"]
 };
 
 export async function interpretFilters(input) {
@@ -41,7 +42,9 @@ export async function interpretFilters(input) {
         "You translate a B2B ICP into Apollo-compatible search terms.",
         "Expand one industry into close Apollo taxonomy synonyms, always including the canonical English industry terms plus useful Spanish equivalents, not unrelated adjacent markets.",
         "Expand each selected role into Spanish and English title variants; roles are OR alternatives.",
-        "Use the free-text brief to propose useful company keywords as non-filtering context, plus contact locations, explicit exclusions and seniorities.",
+        "Use the free-text brief to propose useful company keywords as non-filtering context, plus contact locations, explicit company/technology exclusions, explicit title exclusions and seniorities.",
+        "If the user says companies should not have or should not use a technology, put that technology in excludedCompanyKeywords, not in companyKeywords and not in excludedTitles.",
+        "excludedTitles is only for contact job titles or roles to avoid, never for products, CRMs, technologies, industries, or company attributes.",
         "Company keywords are signals to document and prioritize, never mandatory Apollo search filters.",
         "Do not loosen mandatory verified email, valid phone, company domain, countries, or employee range.",
         "When optional company keywords or contact locations might overconstrain results, recommend removing them first in relaxation. Return concise Spanish explanation."
@@ -87,6 +90,7 @@ function mockInterpretation(input) {
     seniorities: inferSeniorities(roleTitles),
     companyKeywords: extractCompanySignals(input.adHocBrief).slice(0, 8),
     contactLocations: unique(input.countries || []).slice(0, 8),
+    excludedCompanyKeywords: extractCompanyExclusions(input.adHocBrief).slice(0, 8),
     excludedTitles: [],
     explanation: "Interpretacion mock generada localmente para staging; no llamo OpenAI real.",
     relaxation: {
@@ -132,10 +136,21 @@ function inferSeniorities(roles) {
 
 function extractCompanySignals(brief = "") {
   const text = String(brief || "");
+  const exclusions = new Set(extractCompanyExclusions(text).map(normalize));
   return unique([
     ...extractQuotedTerms(text),
     ...["HubSpot", "CRM", "pipeline", "marketing", "ventas", "automatizacion"].filter(term => normalize(text).includes(normalize(term)))
-  ]);
+  ]).filter(term => !exclusions.has(normalize(term)));
+}
+
+function extractCompanyExclusions(brief = "") {
+  const text = normalize(brief);
+  const technologies = ["HubSpot", "Salesforce", "Zoho", "Pipedrive", "CRM"];
+  return technologies.filter(term => {
+    const normalizedTerm = normalize(term).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b(no|sin|excluir|excluye|evitar|evita|que no tengan|que no usen|no tengan|no usen|no utilicen)\\b[^.。;\\n]{0,50}\\b${normalizedTerm}\\b`).test(text)
+      || new RegExp(`\\b${normalizedTerm}\\b[^.。;\\n]{0,30}\\b(excluir|excluye|evitar|evita)\\b`).test(text);
+  });
 }
 
 function extractQuotedTerms(value = "") {

@@ -197,7 +197,7 @@ test("mock external services mode interprets filters without calling OpenAI", as
     selectedRoles: ["Director Comercial"],
     countries: ["Mexico"],
     employeeRange: [50, 5000],
-    adHocBrief: "Busca empresas con CRM y pipeline comercial."
+    adHocBrief: "Busca empresas con CRM y pipeline comercial que no tengan HubSpot."
   });
   const diagnostic = await verifyOpenAIConnection();
   assert.equal(called, false);
@@ -206,6 +206,9 @@ test("mock external services mode interprets filters without calling OpenAI", as
   assert.ok(interpretation.industryKeywords.includes("Retail"));
   assert.ok(interpretation.roleTitles.includes("Director Comercial"));
   assert.ok(interpretation.companyKeywords.includes("CRM"));
+  assert.equal(interpretation.companyKeywords.includes("HubSpot"), false);
+  assert.ok(interpretation.excludedCompanyKeywords.includes("HubSpot"));
+  assert.deepEqual(interpretation.excludedTitles, []);
 });
 
 test("ARA knowledge profile is available to agents", () => {
@@ -331,6 +334,7 @@ test("Apollo payload uses only current console filters and approved expansions",
       seniorities: ["director"],
       contactLocations: ["Monterrey"],
       companyKeywords: ["CRM", "manual sales"],
+      excludedCompanyKeywords: ["HubSpot"],
       excludedTitles: ["Assistant"]
     }
   }, "Manufacturing", 2);
@@ -348,7 +352,53 @@ test("Apollo payload uses only current console filters and approved expansions",
   assert.equal("person_locations" in payload, false);
   assert.equal("person_seniorities" in payload, false);
   assert.equal("excludedTitles" in payload, false);
+  assert.equal("excludedCompanyKeywords" in payload, false);
   assert.equal("companyKeywords" in payload, false);
+});
+
+test("company technology exclusions reject matching Apollo organizations when provider data is available", async () => {
+  config.externalServicesMode = "live";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    people: [
+      {
+        id: "apollo-hubspot",
+        first_name: "Ana",
+        last_name: "Diaz",
+        email: "ana@example.com",
+        email_status: "verified",
+        title: "Director Comercial",
+        phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
+        organization: {
+          name: "Example HubSpot User",
+          primary_domain: "example.com",
+          technologies: [{ name: "HubSpot" }]
+        }
+      },
+      {
+        id: "apollo-no-hubspot",
+        first_name: "Luis",
+        last_name: "Ruiz",
+        email: "luis@other.com",
+        email_status: "verified",
+        title: "Director Comercial",
+        phone_numbers: [{ type: "mobile", sanitized_number: "+525511113333" }],
+        organization: {
+          name: "Other CRM Prospect",
+          primary_domain: "other.com",
+          technologies: [{ name: "Salesforce" }]
+        }
+      }
+    ]
+  }), { status: 200 });
+  const candidates = await findApolloCandidates({
+    ...searchFilters(),
+    interpretation: {
+      ...searchFilters().interpretation,
+      excludedCompanyKeywords: ["HubSpot"]
+    }
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].email, "luis@other.com");
 });
 
 test("Apollo search falls back to selected roles without industry keyword", async () => {
