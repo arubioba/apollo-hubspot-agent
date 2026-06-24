@@ -42,19 +42,13 @@ async function hubspot(path, options = {}) {
 
 export async function findApolloCandidates(filters, page = 1) {
   const results = [];
-  for (const industry of filters.interpretation.industryKeywords) {
-    const payload = {
+  for (const industry of getIndustrySearchTerms(filters)) {
+    const payload = buildApolloSearchPayload(filters, industry, page);
+    logger.info("apollo.search.payload", "Apollo search payload prepared from current console filters.", {
       page,
-      per_page: 100,
-      organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
-      organization_locations: filters.countries,
-      q_organization_keyword_tags: [industry],
-      person_titles: filters.interpretation.roleTitles,
-      person_seniorities: filters.interpretation.seniorities,
-      person_locations: filters.interpretation.contactLocations,
-      include_similar_titles: true,
-      contact_email_status: ["verified"]
-    };
+      industry,
+      keys: Object.keys(payload)
+    });
     const data = await apollo("/contacts/search", payload);
     results.push(...(data.people || data.contacts || []));
   }
@@ -67,17 +61,28 @@ export async function findApolloCandidates(filters, page = 1) {
       const accepted = c.emailVerified && c.company.domain && c.validPhones.some(isMappableContactPhone);
       if (!accepted) logger.debug("candidate.rejected", "Candidate rejected by eligibility filters.", { email: c.email, title: c.title });
       return accepted;
-    })
-    .filter(c => {
-      const rejected = matchesExcludedTitle(c.title, filters.interpretation.excludedTitles);
-      if (rejected) logger.debug("candidate.rejected", "Candidate rejected by title exclusion.", { email: c.email, title: c.title });
-      return !rejected;
     });
 }
 
-function matchesExcludedTitle(title, exclusions) {
-  const normalized = (title || "").toLowerCase();
-  return exclusions.some(value => normalized.includes(value.toLowerCase()));
+export function buildApolloSearchPayload(filters, industry, page = 1) {
+  return compact({
+    page,
+    per_page: 100,
+    organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
+    organization_locations: filters.countries,
+    q_organization_keyword_tags: [industry],
+    person_titles: filters.interpretation?.roleTitles || filters.roles,
+    person_seniorities: filters.interpretation?.seniorities || [],
+    include_similar_titles: true,
+    contact_email_status: ["verified"]
+  });
+}
+
+function getIndustrySearchTerms(filters) {
+  const terms = filters.interpretation?.industryKeywords?.length
+    ? filters.interpretation.industryKeywords
+    : [filters.industry];
+  return [...new Set(terms.map(term => String(term || "").trim()).filter(Boolean))];
 }
 
 export function normalizeCandidate(person) {
@@ -135,7 +140,7 @@ function companyProperties(company) {
     city: company.city, state: company.state, country: company.country, zip: company.zip,
     linkedin_company_page: company.linkedin,
     numberofemployees: company.employees ? String(company.employees) : undefined,
-    apollo_company_keywords: company.keywords?.length ? company.keywords.join("; ") : undefined
+    ara_company_keywords: company.keywords?.length ? company.keywords.join("; ") : undefined
   });
 }
 
@@ -182,11 +187,16 @@ export async function importCandidate(candidate, filters) {
   if (!candidate.email || !candidate.company.domain) {
     throw new ValidationError("Missing verified email or company domain");
   }
+  const araIncoming = araContactProperties(candidate, filters);
   const contactIncoming = {
     ...contactProperties(candidate),
-    freelan_icp_match_context: buildIcpContext(candidate, filters)
+    ...araIncoming,
+    freelan_icp_match_context: araIncoming.ara_icp_match_context
   };
-  const companyIncoming = companyProperties(candidate.company);
+  const companyIncoming = {
+    ...companyProperties(candidate.company),
+    ...araCompanyProperties(candidate, filters)
+  };
   if (isPreviewMode()) {
     logger.info("hubspot.preview.completed", "HubSpot candidate preview completed.", { email: candidate.email });
     return { preview: true, email: candidate.email, contactProperties: contactIncoming, companyProperties: companyIncoming };
@@ -220,27 +230,137 @@ function buildIcpContext(candidate, filters) {
   ].join("\n");
 }
 
+function araContactProperties(candidate, filters) {
+  return compact({
+    ara_managed: "true",
+    ara_tenant_id: config.defaultTenantId,
+    ara_campaign_id: filters.campaignId,
+    ara_run_id: filters.runId,
+    ara_lifecycle_status: "HUBSPOT_SYNCED",
+    ara_owner_approval_status: "APPROVED",
+    ara_source: "APOLLO",
+    ara_current_agent: "HUBSPOT_CONNECTOR",
+    ara_data_confidence: "80",
+    ara_icp_match_context: buildIcpContext(candidate, filters)
+  });
+}
+
+function araCompanyProperties(candidate, filters) {
+  return compact({
+    ara_managed: "true",
+    ara_tenant_id: config.defaultTenantId,
+    ara_campaign_id: filters.campaignId,
+    ara_run_id: filters.runId,
+    ara_source: "APOLLO",
+    ara_current_agent: "HUBSPOT_CONNECTOR",
+    ara_icp_match_context: buildIcpContext(candidate, filters),
+    ara_company_keywords: candidate.company.keywords?.length ? candidate.company.keywords.join("; ") : undefined
+  });
+}
+
 export async function ensureHubSpotProperties() {
   assertHubSpotWriteAllowed("hubspot.properties.ensure");
-  const path = "/crm/v3/properties/contacts/freelan_icp_match_context";
+  const created = [];
+  for (const spec of hubSpotPropertySpecs()) {
+    if (await ensureHubSpotProperty(spec)) created.push(`${spec.objectType}.${spec.name}`);
+  }
+  return { created: created.length > 0, createdProperties: created };
+}
+
+async function ensureHubSpotProperty(spec) {
   try {
-    await hubspot(path);
-    return { created: false };
+    await hubspot(`/crm/v3/properties/${spec.objectType}/${spec.name}`);
+    return false;
   } catch (error) {
     if (!error.cause?.message?.startsWith("404")) throw error;
   }
-  await hubspot("/crm/v3/properties/contacts", {
+  await hubspot(`/crm/v3/properties/${spec.objectType}`, {
     method: "POST",
     body: JSON.stringify({
-      groupName: "contactinformation",
-      name: "freelan_icp_match_context",
-      label: "Freelan ICP Match Context",
-      type: "string",
-      fieldType: "textarea",
-      description: "Contexto y senales que explican por que el contacto coincide con el ICP seleccionado."
+      groupName: spec.groupName,
+      name: spec.name,
+      label: spec.label,
+      type: spec.type,
+      fieldType: spec.fieldType,
+      description: spec.description,
+      options: spec.options
     })
   });
-  return { created: true };
+  return true;
+}
+
+function hubSpotPropertySpecs() {
+  const lifecycleOptions = ["DISCOVERED", "RECOMMENDED", "APPROVED", "HUBSPOT_SYNCED", "HUMAN_REVIEW_REQUIRED", "DISQUALIFIED", "ARCHIVED"];
+  const approvalOptions = ["NOT_REQUIRED", "PENDING", "APPROVED", "REJECTED", "CHANGES_REQUESTED", "EXPIRED"];
+  const sourceOptions = ["APOLLO", "MANUAL", "IMPORT", "HUBSPOT", "OTHER"];
+  const agentOptions = ["DISCOVERY", "DATA_INTELLIGENCE", "ACCOUNT_INTELLIGENCE", "ENGAGEMENT", "HUBSPOT_CONNECTOR", "NONE"];
+  const shared = [
+    boolProperty("ara_managed", "ARA Managed", "Record is managed by ARA."),
+    textProperty("ara_tenant_id", "ARA Tenant ID", "Tenant that owns this ARA record."),
+    textProperty("ara_campaign_id", "ARA Campaign ID", "ARA campaign identifier."),
+    textProperty("ara_run_id", "ARA Run ID", "ARA run identifier."),
+    enumProperty("ara_source", "ARA Source", "Original ARA discovery source.", sourceOptions),
+    enumProperty("ara_current_agent", "ARA Current Agent", "Latest ARA agent that processed this record.", agentOptions),
+    textareaProperty("ara_icp_match_context", "ARA ICP Match Context", "Context and evidence explaining the ICP match."),
+    textareaProperty("ara_company_keywords", "ARA Company Keywords", "Apollo company keywords captured by ARA.")
+  ];
+  return [
+    legacyContactContextProperty(),
+    ...forObject("contacts", "contactinformation", [
+      ...shared,
+      enumProperty("ara_lifecycle_status", "ARA Lifecycle Status", "Current ARA lifecycle status.", lifecycleOptions),
+      enumProperty("ara_owner_approval_status", "ARA Owner Approval Status", "Human approval status.", approvalOptions),
+      numberProperty("ara_icp_score", "ARA ICP Score", "Company ICP score from ARA."),
+      numberProperty("ara_contact_score", "ARA Contact Score", "Contact relevance score from ARA."),
+      numberProperty("ara_opportunity_score", "ARA Opportunity Score", "Overall opportunity score from ARA."),
+      numberProperty("ara_data_confidence", "ARA Data Confidence", "Confidence in ARA data quality."),
+      textareaProperty("ara_exclusion_reason", "ARA Exclusion Reason", "Reason why ARA excluded or disqualified the record.")
+    ]),
+    ...forObject("companies", "companyinformation", shared)
+  ];
+}
+
+function forObject(objectType, groupName, specs) {
+  return specs.map(spec => ({ ...spec, objectType, groupName }));
+}
+
+function legacyContactContextProperty() {
+  return {
+    objectType: "contacts",
+    groupName: "contactinformation",
+    ...textareaProperty(
+      "freelan_icp_match_context",
+      "Freelan ICP Match Context",
+      "Legacy context field kept during the ARA migration."
+    )
+  };
+}
+
+function textProperty(name, label, description) {
+  return { name, label, description, type: "string", fieldType: "text" };
+}
+
+function textareaProperty(name, label, description) {
+  return { name, label, description, type: "string", fieldType: "textarea" };
+}
+
+function numberProperty(name, label, description) {
+  return { name, label, description, type: "number", fieldType: "number" };
+}
+
+function boolProperty(name, label, description) {
+  return { name, label, description, type: "bool", fieldType: "booleancheckbox" };
+}
+
+function enumProperty(name, label, description, values) {
+  return {
+    name,
+    label,
+    description,
+    type: "enumeration",
+    fieldType: "select",
+    options: values.map(value => ({ label: value, value }))
+  };
 }
 
 export async function verifyHubSpotConnection() {
