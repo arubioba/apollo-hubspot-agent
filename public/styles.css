@@ -89,6 +89,7 @@ th { color: #60746a; font-size: 12px; text-transform: uppercase; letter-spacing:
 .feed-entry.error { background: #fff2ee; border-color: #ffcdbb; }
 .report pre { margin: 0; white-space: pre-wrap; }
 .login-modal { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(5, 11, 20, .82); backdrop-filter: blur(8px); z-index: 20; }
+.login-modal[hidden] { display: none; }
 .login-card { width: min(430px, 100%); display: grid; gap: 14px; padding: 26px; border-radius: 24px; background: #ffffff; border: 1px solid var(--line); box-shadow: 0 24px 80px #00000045; }
 .login-logo { width: 132px; padding: 10px 12px; border-radius: 14px; background: var(--navy); }
 .login-card h2 { font-size: 28px; }
