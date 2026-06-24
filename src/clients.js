@@ -349,7 +349,17 @@ function numberProperty(name, label, description) {
 }
 
 function boolProperty(name, label, description) {
-  return { name, label, description, type: "bool", fieldType: "booleancheckbox" };
+  return {
+    name,
+    label,
+    description,
+    type: "bool",
+    fieldType: "booleancheckbox",
+    options: [
+      { label: "Yes", value: "true" },
+      { label: "No", value: "false" }
+    ]
+  };
 }
 
 function enumProperty(name, label, description, values) {
