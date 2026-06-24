@@ -121,7 +121,7 @@ export async function executeTest(id) {
   });
   const batch = run.candidates.slice(0, config.testBatchSize);
   if (config.writeMode === "enabled") await ensureHubSpotProperties();
-  run.testResults = await executeBatch(batch, false, run.filters);
+  run.testResults = await executeBatch(batch, false, filtersWithRunContext(run));
   run.phase = "test_review";
   await saveRun(run);
   return { run, message: config.writeMode === "preview" ? "Preview terminado. No se escribio en HubSpot." : "Prueba terminada. Verifica los contactos en HubSpot antes de continuar." };
@@ -141,7 +141,7 @@ export async function executeFinal(id, approvalCode) {
   }
   const batch = run.candidates.slice(config.testBatchSize, config.testBatchSize + requested);
   if (config.writeMode === "enabled") await ensureHubSpotProperties();
-  run.finalResults = await executeBatch(batch, true, run.filters);
+  run.finalResults = await executeBatch(batch, true, filtersWithRunContext(run));
   run.phase = "complete";
   await saveRun(run);
   const missing = requested - run.finalResults.successful.length;
@@ -187,6 +187,14 @@ async function executeBatch(batch, countAgainstLimit, filters) {
     }
   }
   return { successful, failed };
+}
+
+function filtersWithRunContext(run) {
+  return {
+    ...run.filters,
+    runId: run.id,
+    campaignId: run.id
+  };
 }
 
 function uniqueByEmail(items) {
