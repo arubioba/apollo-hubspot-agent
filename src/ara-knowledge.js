@@ -25,8 +25,8 @@ export function getAraKnowledgeProfile() {
     const markdown = readFileSync(new URL("../knowledge/ara/freelan-ara-profile.md", import.meta.url), "utf8");
     cachedProfile = {
       corePremise: extractParagraph(markdown, "Core Premise") || fallbackProfile.corePremise,
-      opportunitySignals: extractBullets(markdown, "Opportunity Signals"),
-      servicePortfolio: extractBullets(markdown, "Service Portfolio")
+      opportunitySignals: extractBullets(markdown, "Opportunity Signals", fallbackProfile.opportunitySignals),
+      servicePortfolio: extractBullets(markdown, "Service Portfolio", fallbackProfile.servicePortfolio)
     };
   } catch {
     cachedProfile = fallbackProfile;
@@ -39,13 +39,13 @@ function extractParagraph(markdown, heading) {
   return section.split("\n").map(line => line.trim()).filter(line => line && !line.startsWith("-"))[0] || "";
 }
 
-function extractBullets(markdown, heading) {
+function extractBullets(markdown, heading, fallback) {
   const bullets = extractSection(markdown, heading)
     .split("\n")
     .map(line => line.trim())
     .filter(line => line.startsWith("-"))
     .map(line => line.replace(/^-\s*/, ""));
-  return bullets.length ? bullets : fallbackProfile.opportunitySignals;
+  return bullets.length ? bullets : fallback;
 }
 
 function extractSection(markdown, heading) {

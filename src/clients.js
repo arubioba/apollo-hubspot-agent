@@ -313,7 +313,10 @@ export async function importCandidate(candidate, filters) {
 
 export async function writeEngagementPrep(candidate, filters) {
   if (!candidate.email) throw new ValidationError("Missing contact email for Engagement Prep");
-  const note = buildEngagementPrepNote(candidate, filters);
+  const intelligence = isPreviewMode()
+    ? mockAccountIntelligence(candidate, filters)
+    : await buildAccountIntelligence(candidate, filters);
+  const note = buildEngagementPrepNote(candidate, filters, intelligence);
   const properties = { ara_engagement_prep_notes: note };
   if (isPreviewMode()) {
     logger.info("hubspot.engagement_preview.completed", "HubSpot engagement prep preview completed.", { email: candidate.email });
@@ -329,6 +332,100 @@ export async function writeEngagementPrep(candidate, filters) {
   return { contactId: contact.id, email: candidate.email, engagementPrepNotes: note };
 }
 
+function mockAccountIntelligence(candidate, filters) {
+  return {
+    website: {
+      url: candidate.company?.website || `https://${candidate.company?.domain}`,
+      summary: `${candidate.company?.name || "La empresa"} presenta señales compatibles con el ICP ${filters.industry}.`,
+      signals: ["revenue operations", "CRM", "automatización comercial"]
+    },
+    stakeholders: buyerPersonaTitles(filters).slice(0, 2).map((title, index) => ({
+      name: ["Stakeholder ARA 1", "Stakeholder ARA 2"][index],
+      title,
+      email: "",
+      linkedin: "",
+      reason: "Buyer persona alineado al ICP Freelan/ARA."
+    }))
+  };
+}
+
+async function buildAccountIntelligence(candidate, filters) {
+  const [website, stakeholders] = await Promise.all([
+    analyzeCompanyWebsite(candidate).catch(error => {
+      logger.warn("account_intelligence.website_failed", "Website analysis failed.", { domain: candidate.company?.domain, error });
+      return null;
+    }),
+    findAdditionalStakeholders(candidate, filters).catch(error => {
+      logger.warn("account_intelligence.stakeholders_failed", "Stakeholder discovery failed.", { domain: candidate.company?.domain, error });
+      return [];
+    })
+  ]);
+  return { website, stakeholders };
+}
+
+async function analyzeCompanyWebsite(candidate) {
+  if (config.externalServicesMode === "mock") {
+    return {
+      url: candidate.company?.website || `https://${candidate.company?.domain}`,
+      summary: `${candidate.company?.name || "La empresa"} presenta señales comerciales compatibles con el ICP y requiere validación consultiva del modelo de ingresos.`,
+      signals: ["modelo comercial B2B/B2C", "oportunidad de revenue operations", "potencial de automatización comercial"]
+    };
+  }
+  const url = normalizeWebsiteUrl(candidate.company?.website || candidate.company?.domain);
+  if (!url) return null;
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(7000),
+    headers: { "User-Agent": "ARA-Freelan/0.1 (+https://freelan.com.mx)" }
+  });
+  if (!response.ok) throw new Error(`Website ${response.status}`);
+  const html = await response.text();
+  const text = htmlToText(html).slice(0, 5000);
+  if (!text) return { url, summary: "No fue posible extraer contenido legible del sitio.", signals: [] };
+  return summarizeWebsiteText(url, text, candidate);
+}
+
+async function findAdditionalStakeholders(candidate, filters) {
+  const domain = candidate.company?.domain;
+  if (!domain) return [];
+  const titles = buyerPersonaTitles(filters);
+  if (config.externalServicesMode === "mock") {
+    return titles.slice(0, 2).map((title, index) => ({
+      name: ["Patricia Revenue", "Mario Growth"][index],
+      title,
+      email: `${slug(title)}.${index + 1}@${domain}`,
+      linkedin: `https://linkedin.com/in/mock-stakeholder-${index + 1}`,
+      reason: "Buyer persona sugerido por ARA para validar oportunidad comercial."
+    }));
+  }
+  const data = await apollo("/contacts/search", compact({
+    page: 1,
+    per_page: 25,
+    q_organization_domains: [domain],
+    person_titles: titles,
+    include_similar_titles: true,
+    contact_email_status: ["verified"]
+  }));
+  return normalizeStakeholderCandidates(data.people || data.contacts || [], domain)
+    .filter(person => person.email?.toLowerCase() !== candidate.email?.toLowerCase())
+    .slice(0, 2)
+    .map(person => ({
+      name: [person.firstName, person.lastName].filter(Boolean).join(" ") || person.email,
+      title: person.title,
+      email: person.email,
+      linkedin: person.linkedin,
+      reason: "Rol alineado a buyer personas Freelan/ARA dentro del mismo dominio."
+    }));
+}
+
+function normalizeStakeholderCandidates(results, domain) {
+  return [...new Map(results.map(person => [person.id, person])).values()]
+    .map(normalizeCandidate)
+    .filter(person => {
+      const sameDomain = person.company.domain?.toLowerCase() === domain.toLowerCase();
+      return person.emailVerified && person.email && sameDomain;
+    });
+}
+
 function buildIcpContext(candidate, filters) {
   return [
     "Coincidencia ICP seleccionada por Freelan Revenue Agent",
@@ -342,7 +439,7 @@ function buildIcpContext(candidate, filters) {
   ].join("\n");
 }
 
-function buildEngagementPrepNote(candidate, filters) {
+function buildEngagementPrepNote(candidate, filters, intelligence = {}) {
   const company = candidate.company || {};
   const araProfile = getAraKnowledgeProfile();
   const contactName = [candidate.firstName, candidate.lastName].filter(Boolean).join(" ") || candidate.contactName || candidate.email;
@@ -356,6 +453,11 @@ function buildEngagementPrepNote(candidate, filters) {
     "Contexto de la empresa",
     `${company.name || candidate.companyName || "Empresa sin nombre"} (${company.domain || candidate.domain || "dominio no disponible"}) opera en el ICP solicitado: ${filters.industry}. Empleados objetivo: ${filters.employeeMin}-${filters.employeeMax}. Pais(es): ${(filters.countries || []).join(", ")}. Senales capturadas: ${signals}. Evidencia ARA: ${evidence}`,
     "",
+    "Análisis del sitio web",
+    intelligence.website
+      ? `${intelligence.website.summary} Señales detectadas: ${intelligence.website.signals.join("; ") || "sin señales específicas"}. Fuente: ${intelligence.website.url}.`
+      : "Pendiente: no se pudo analizar el sitio web durante esta preparación.",
+    "",
     "Oportunidades potenciales - con base en el research y la propuesta de valor de Freelan.",
     `Lente ARA/Freelan: ${araProfile.corePremise}`,
     `Señales de oportunidad a validar: ${araProfile.opportunitySignals.slice(0, 5).join("; ")}.`,
@@ -364,6 +466,9 @@ function buildEngagementPrepNote(candidate, filters) {
     "Key Stake Holders",
     `Contacto principal: ${contactName} - ${candidate.title || candidate.jobTitle || "cargo no disponible"} (${candidate.email}).`,
     `Stakeholders sugeridos: ${filters.roles.join(", ")}; Revenue Operations; CRM Owner; Direccion Comercial; Marketing Operations.`,
+    ...(intelligence.stakeholders?.length ? intelligence.stakeholders.map(stakeholder =>
+      `Stakeholder adicional: ${stakeholder.name} - ${stakeholder.title || "cargo no disponible"} (${stakeholder.email || "email no disponible"}). ${stakeholder.reason}`
+    ) : ["Stakeholders adicionales: no se encontraron contactos adicionales alineados a buyer personas en Apollo."]),
     "",
     "Recomendaciones de approach",
     "1. Abrir con una hipotesis concreta ligada al ICP y al rol del contacto.",
@@ -371,6 +476,71 @@ function buildEngagementPrepNote(candidate, filters) {
     "3. Conectar la conversacion con sistemas de revenue autonomos sobre HubSpot.",
     "4. Proponer una auditoria corta de procesos comerciales, datos y automatizaciones existentes."
   ].join("\n");
+}
+
+function normalizeWebsiteUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function htmlToText(html = "") {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summarizeWebsiteText(url, text, candidate) {
+  const sentences = text.split(/(?<=[.!?])\s+/).map(value => value.trim()).filter(Boolean);
+  const summary = sentences.slice(0, 2).join(" ").slice(0, 600)
+    || `${candidate.company?.name || "La empresa"} tiene presencia web activa.`;
+  const normalized = text.toLowerCase();
+  const signals = [
+    ["crm", "CRM"],
+    ["ventas", "ventas"],
+    ["marketing", "marketing"],
+    ["clientes", "gestión de clientes"],
+    ["digital", "transformación digital"],
+    ["tecnología", "tecnología"],
+    ["automat", "automatización"],
+    ["distrib", "distribución"],
+    ["retail", "retail"],
+    ["salud", "salud"],
+    ["software", "software"]
+  ].filter(([needle]) => normalized.includes(needle)).map(([, label]) => label);
+  return { url, summary, signals: unique(signals).slice(0, 6) };
+}
+
+function buyerPersonaTitles(filters = {}) {
+  return unique([
+    "CEO",
+    "Director General",
+    "Chief Executive Officer",
+    "CMO",
+    "Chief Marketing Officer",
+    "Director de Marketing",
+    "Marketing Director",
+    "CIO",
+    "CTO",
+    "Chief Information Officer",
+    "Chief Technology Officer",
+    "Director de Tecnologia",
+    "Technology Director",
+    "Director Comercial",
+    "Sales Director",
+    "Director de Ventas",
+    ...(filters.roles || []),
+    ...(filters.interpretation?.roleTitles || [])
+  ]).slice(0, 20);
 }
 
 function araContactProperties(candidate, filters) {

@@ -254,6 +254,8 @@ test("preview mode returns Engagement Prep notes without calling HubSpot", async
   assert.equal(result.preview, true);
   assert.equal(called, false);
   assert.match(result.contactProperties.ara_engagement_prep_notes, /Contexto de la empresa/);
+  assert.match(result.contactProperties.ara_engagement_prep_notes, /Análisis del sitio web/);
+  assert.match(result.contactProperties.ara_engagement_prep_notes, /Stakeholder adicional/);
   assert.match(result.contactProperties.ara_engagement_prep_notes, /Recomendaciones de approach/);
 });
 
