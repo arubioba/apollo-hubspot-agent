@@ -20,6 +20,8 @@ const smokeConfig = {
   diagnosticsEnabled: false,
   rateLimitEnabled: false,
   adminToken: "staging-smoke-token",
+  operatorEmail: "operator@example.test",
+  operatorPassword: "valid-password",
   databaseUrl: "postgresql://localhost:5432/smoke",
   apolloKey: "mock-apollo-key",
   hubspotToken: "mock-hubspot-token",
@@ -188,9 +190,27 @@ try {
   });
 
   const auth = { "X-ARA-Admin-Token": smokeConfig.adminToken };
+  let sessionAuth;
+
+  await check("operator login returns session token", async () => {
+    const response = await request({
+      method: "POST",
+      url: "/api/session",
+      body: { email: smokeConfig.operatorEmail, password: smokeConfig.operatorPassword }
+    });
+    assert.equal(response.status, 200);
+    assert.ok(response.body.session.token);
+    sessionAuth = { "X-ARA-Session-Token": response.body.session.token };
+  });
 
   await check("valid staging token allows protected access", async () => {
     const response = await request({ url: "/api/audit/latest-import", headers: auth });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.found, true);
+  });
+
+  await check("valid operator session allows protected access", async () => {
+    const response = await request({ url: "/api/audit/latest-import", headers: sessionAuth });
     assert.equal(response.status, 200);
     assert.equal(response.body.found, true);
   });

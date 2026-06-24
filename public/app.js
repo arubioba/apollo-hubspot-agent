@@ -1,12 +1,15 @@
 let run;
 let selectedRoles = [];
-let adminToken = normalizeToken(sessionStorage.getItem("araAdminToken") || "");
+let sessionToken = sessionStorage.getItem("araSessionToken") || "";
+let operatorEmail = sessionStorage.getItem("araOperatorEmail") || "";
 
 const $ = selector => document.querySelector(selector);
 const feed = $("#operator-feed");
 const form = $("#campaign-form");
+const loginModal = $("#login-modal");
+const loginForm = $("#login-form");
 const actions = {
-  token: $("#token-button"),
+  session: $("#session-button"),
   newRun: $("#new-run"),
   approveSearch: $("#approve-search"),
   editFilters: $("#edit-filters"),
@@ -27,11 +30,12 @@ async function boot() {
   setSystem("Starting", "Inicializando consola ARA.");
   renderTimeline("orchestrator", []);
   bindEvents();
-  updateTokenButton();
-  if (!adminToken) {
+  updateSessionButton();
+  if (!sessionToken) {
     clearFeed();
-    addFeed("Revenue Orchestrator", "Antes de iniciar, carga el token interno con el boton Token.");
-    setSystem("Needs token", "Carga el token interno para activar la consola.");
+    addFeed("Revenue Orchestrator", "Antes de iniciar, valida tu usuario Freelan.");
+    setSystem("Needs login", "Inicia sesion para activar la consola.");
+    showLogin();
     return;
   }
   await startRun();
@@ -62,11 +66,13 @@ async function startRun() {
 }
 
 function bindEvents() {
-  actions.token.onclick = () => {
-    adminToken = normalizeToken(prompt("Token interno ARA", adminToken) || "");
-    sessionStorage.setItem("araAdminToken", adminToken);
-    updateTokenButton();
-    if (adminToken) startRun().catch(showError);
+  actions.session.onclick = () => {
+    if (sessionToken) return logout();
+    showLogin();
+  };
+  loginForm.onsubmit = event => {
+    event.preventDefault();
+    login().catch(showLoginError);
   };
   actions.newRun.onclick = () => startRun().catch(showError);
   actions.editFilters.onclick = () => {
@@ -276,17 +282,10 @@ function showError(error) {
 }
 
 async function call(path, body = {}, method = "POST") {
-  if (!adminToken) {
-    adminToken = normalizeToken(prompt("Token interno ARA") || "");
-    sessionStorage.setItem("araAdminToken", adminToken);
-    updateTokenButton();
-  }
-  if (!adminToken) {
-    throw new Error("Carga el token interno ARA para activar la consola.");
-  }
+  if (!sessionToken) throw new Error("Inicia sesion para activar la consola.");
   const response = await fetch(path, {
     method,
-    headers: { "Content-Type": "application/json", "X-ARA-Admin-Token": adminToken },
+    headers: { "Content-Type": "application/json", "X-ARA-Session-Token": sessionToken },
     body: method === "GET" ? undefined : JSON.stringify(body)
   });
   const data = await safeJson(response);
@@ -296,23 +295,82 @@ async function call(path, body = {}, method = "POST") {
     error.code = data.error?.code;
     error.correlationId = data.correlation_id || data.correlationId;
     if (response.status === 401) {
-      adminToken = "";
-      sessionStorage.removeItem("araAdminToken");
-      updateTokenButton();
-      error.message = "Token interno invalido o ausente. Da clic en Token, carga el valor correcto y reintenta.";
+      clearSession();
+      showLogin();
+      error.message = "Sesion invalida o expirada. Inicia sesion y reintenta.";
     }
     throw error;
   }
   return data;
 }
 
-function updateTokenButton() {
-  actions.token.textContent = adminToken ? "Token cargado" : "Token";
-  actions.token.classList.toggle("ready", Boolean(adminToken));
+async function login() {
+  const email = $("#login-email").value.trim().toLowerCase();
+  const password = $("#login-password").value;
+  const response = await fetch("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await safeJson(response);
+  if (!response.ok) {
+    const error = new Error(data.error?.message || "No se pudo iniciar sesion.");
+    error.correlationId = data.correlation_id || data.correlationId;
+    throw error;
+  }
+  sessionToken = data.session.token;
+  operatorEmail = data.session.operator_email;
+  sessionStorage.setItem("araSessionToken", sessionToken);
+  sessionStorage.setItem("araOperatorEmail", operatorEmail);
+  $("#login-password").value = "";
+  hideLogin();
+  updateSessionButton();
+  await startRun();
+  setSystem("Ready", "Consola lista para configurar una campana.");
 }
 
-function normalizeToken(value = "") {
-  return String(value).trim().replace(/^Bearer\s+/i, "").replace(/^["']|["']$/g, "");
+function logout() {
+  clearSession();
+  run = undefined;
+  clearFeed();
+  $("#run-id").textContent = "No run";
+  $("#phase-pill").textContent = "Idle";
+  $("#candidate-table").innerHTML = emptyRow("Inicia sesion para activar la consola.");
+  $("#candidate-summary").innerHTML = "";
+  $("#report").textContent = "Aun no hay ejecuciones.";
+  actions.preview.disabled = true;
+  actions.import.disabled = true;
+  updateSessionButton();
+  setSystem("Needs login", "Inicia sesion para activar la consola.");
+  showLogin();
+}
+
+function clearSession() {
+  sessionToken = "";
+  operatorEmail = "";
+  sessionStorage.removeItem("araSessionToken");
+  sessionStorage.removeItem("araOperatorEmail");
+}
+
+function showLogin() {
+  $("#login-email").value = operatorEmail || "antonio.rubio@freelan.com.mx";
+  $("#login-error").textContent = "";
+  loginModal.hidden = false;
+  setTimeout(() => $("#login-password").focus(), 0);
+}
+
+function hideLogin() {
+  loginModal.hidden = true;
+}
+
+function showLoginError(error) {
+  const correlation = error.correlationId ? ` Correlation ID: ${error.correlationId}` : "";
+  $("#login-error").textContent = `${error.message}${correlation}`;
+}
+
+function updateSessionButton() {
+  actions.session.textContent = sessionToken ? "Cerrar sesion" : "Iniciar sesion";
+  actions.session.classList.toggle("ready", Boolean(sessionToken));
 }
 
 async function safeJson(response) {

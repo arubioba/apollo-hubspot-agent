@@ -12,6 +12,8 @@ const original = {
   nodeEnv: config.nodeEnv,
   writeMode: config.writeMode,
   adminToken: config.adminToken
+  , operatorEmail: config.operatorEmail,
+  operatorPassword: config.operatorPassword
   , diagnosticsEnabled: config.diagnosticsEnabled,
   rateLimitEnabled: config.rateLimitEnabled,
   rateLimitMaxRequests: config.rateLimitMaxRequests,
@@ -75,6 +77,8 @@ function makeApp(options = {}) {
   config.nodeEnv = options.nodeEnv || "test";
   config.writeMode = options.writeMode || "disabled";
   config.adminToken = "valid-token";
+  config.operatorEmail = "operator@example.com";
+  config.operatorPassword = "valid-password";
   config.diagnosticsEnabled = options.diagnosticsEnabled ?? false;
   config.rateLimitEnabled = options.rateLimitEnabled ?? false;
   config.rateLimitMaxRequests = options.rateLimitMaxRequests ?? 60;
@@ -93,6 +97,43 @@ function makeApp(options = {}) {
   });
   return { app, logger };
 }
+
+test("operator session endpoint returns a session token for valid credentials", async () => {
+  const { app } = makeApp();
+  const response = await request(app, {
+    method: "POST",
+    url: "/api/session",
+    body: { email: "operator@example.com", password: "valid-password" }
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body.session.token);
+  assert.equal(response.body.session.operator_email, "operator@example.com");
+});
+
+test("operator session token can access protected endpoints", async () => {
+  const { app } = makeApp();
+  const login = await request(app, {
+    method: "POST",
+    url: "/api/session",
+    body: { email: "operator@example.com", password: "valid-password" }
+  });
+  const response = await request(app, {
+    url: "/api/audit/latest-import",
+    headers: { "X-ARA-Session-Token": login.body.session.token }
+  });
+  assert.equal(response.status, 200);
+});
+
+test("operator session endpoint rejects invalid credentials", async () => {
+  const { app } = makeApp();
+  const response = await request(app, {
+    method: "POST",
+    url: "/api/session",
+    body: { email: "operator@example.com", password: "wrong-password" }
+  });
+  assert.equal(response.status, 401);
+  assert.equal(response.body.error.code, "AUTHENTICATION_ERROR");
+});
 
 async function request(app, { method = "GET", url = "/", headers = {}, body } = {}) {
   if (body === undefined && ["POST", "PUT", "PATCH"].includes(method)) body = {};

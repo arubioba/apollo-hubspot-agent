@@ -56,7 +56,7 @@
           <p>Configure el ICP, lance discovery, revise candidatos y controle la sincronizacion comercial.</p>
         </div>
         <div class="top-actions">
-          <button id="token-button" class="secondary" type="button">Token</button>
+          <button id="session-button" class="secondary" type="button">Iniciar sesion</button>
           <button id="new-run" type="button">Nueva campana</button>
         </div>
       </header>
@@ -172,6 +172,22 @@
       </section>
     </section>
   </main>
+  <section id="login-modal" class="login-modal" hidden>
+    <form id="login-form" class="login-card">
+      <img class="login-logo" src="/freelan-logo-white.png" alt="Freelan">
+      <span class="eyebrow">Operator Access</span>
+      <h2>Inicia sesion</h2>
+      <p>Usa tu correo Freelan para activar la consola.</p>
+      <label>Correo
+        <input id="login-email" type="email" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input id="login-password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Entrar</button>
+      <div id="login-error" class="login-error" role="alert"></div>
+    </form>
+  </section>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

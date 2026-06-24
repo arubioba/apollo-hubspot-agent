@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { config, validateConfig } from "../src/config.js";
 import { createCorrelationId, isValidCorrelationId, runWithContext, getCorrelationId } from "../src/context.js";
-import { requireInternalAuth } from "../src/auth.js";
+import { createOperatorSession, requireInternalAuth } from "../src/auth.js";
 import { AuthenticationError, HubSpotWriteBlockedError } from "../src/errors.js";
 import { maskEmail, maskPhone, sanitize } from "../src/logger.js";
 import { assertHubSpotWriteAllowed } from "../src/write-guard.js";
@@ -17,7 +17,9 @@ const original = {
   openaiKey: config.openaiKey,
   approvalCode: config.approvalCode,
   nodeEnv: config.nodeEnv,
-  externalServicesMode: config.externalServicesMode
+  externalServicesMode: config.externalServicesMode,
+  operatorEmail: config.operatorEmail,
+  operatorPassword: config.operatorPassword
 };
 
 test.afterEach(() => {
@@ -111,6 +113,25 @@ test("internal auth normalizes copied token wrappers", () => {
   assert.doesNotThrow(() => requireInternalAuth(reqWithToken('"test-admin-token"')));
 });
 
+test("operator login creates session accepted by internal auth", () => {
+  config.adminToken = "test-admin-token";
+  config.operatorEmail = "antonio.rubio@freelan.com.mx";
+  config.operatorPassword = "test-password";
+  const result = createOperatorSession({
+    email: "antonio.rubio@freelan.com.mx",
+    password: "test-password"
+  });
+  assert.ok(result.session.token);
+  assert.doesNotThrow(() => requireInternalAuth({
+    path: "/api/runs",
+    method: "POST",
+    ip: "127.0.0.1",
+    get(name) {
+      return name.toLowerCase() === "x-ara-session-token" ? result.session.token : undefined;
+    }
+  }));
+});
+
 test("internal auth rejects missing token", () => {
   config.adminToken = "test-admin-token";
   assert.throws(() => requireInternalAuth(reqWithToken(undefined)), AuthenticationError);
@@ -131,7 +152,9 @@ test("configuration validation reports missing required names without values", (
     "HUBSPOT_PRIVATE_APP_TOKEN or HUBSPOT_ACCESS_TOKEN",
     "OPENAI_API_KEY",
     "APPROVAL_CODE",
-    "ARA_ADMIN_TOKEN"
+    "ARA_ADMIN_TOKEN",
+    "ARA_OPERATOR_EMAIL",
+    "ARA_OPERATOR_PASSWORD"
   ]);
 });
 

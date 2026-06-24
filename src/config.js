@@ -13,6 +13,8 @@ export const envSpec = [
   { name: "OPENAI_MODEL", required: false, secret: false, environmentSpecific: false },
   { name: "APPROVAL_CODE", required: true, secret: true, environmentSpecific: true },
   { name: "ARA_ADMIN_TOKEN", required: true, secret: true, environmentSpecific: true },
+  { name: "ARA_OPERATOR_EMAIL", required: true, secret: false, environmentSpecific: true },
+  { name: "ARA_OPERATOR_PASSWORD", required: true, secret: true, environmentSpecific: true },
   { name: "ARA_DEFAULT_TENANT_ID", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_WRITE_MODE", required: false, secret: false, environmentSpecific: true },
   { name: "ARA_EXTERNAL_SERVICES_MODE", required: false, secret: false, environmentSpecific: true },
@@ -39,6 +41,8 @@ export const config = {
   openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   approvalCode: normalizeSecret(process.env.APPROVAL_CODE),
   adminToken: normalizeSecret(process.env.ARA_ADMIN_TOKEN),
+  operatorEmail: normalizeSecret(process.env.ARA_OPERATOR_EMAIL)?.toLowerCase(),
+  operatorPassword: normalizeSecret(process.env.ARA_OPERATOR_PASSWORD),
   defaultTenantId: process.env.ARA_DEFAULT_TENANT_ID || "freelan",
   writeMode: process.env.ARA_WRITE_MODE || "disabled",
   externalServicesMode: process.env.ARA_EXTERNAL_SERVICES_MODE || "mock",
@@ -80,7 +84,9 @@ export function validateConfig() {
     ["HUBSPOT_PRIVATE_APP_TOKEN or HUBSPOT_ACCESS_TOKEN", config.hubspotToken],
     ["OPENAI_API_KEY", config.openaiKey],
     ["APPROVAL_CODE", config.approvalCode],
-    ["ARA_ADMIN_TOKEN", config.adminToken]
+    ["ARA_ADMIN_TOKEN", config.adminToken],
+    ["ARA_OPERATOR_EMAIL", config.operatorEmail],
+    ["ARA_OPERATOR_PASSWORD", config.operatorPassword]
   ].filter(([, value]) => !value).map(([name]) => name);
 
   const errors = [];

@@ -2,7 +2,7 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { createCorrelationId, runWithContext } from "./context.js";
 import { validateConfig } from "./config.js";
-import { requireInternalAuth } from "./auth.js";
+import { createOperatorSession, requireInternalAuth } from "./auth.js";
 import { AppError, toPublicError } from "./errors.js";
 import { logger as defaultLogger } from "./logger.js";
 import { assertDiagnosticsAllowed } from "./diagnostics-policy.js";
@@ -84,6 +84,37 @@ export function createApp({
     }
   };
 
+  const publicRoute = handler => async (req, res) => {
+    const startedAt = Date.now();
+    try {
+      rateLimit(req);
+      requireJsonForBody(req);
+      const validation = validate();
+      if (!validation.ok) {
+        logger.error("configuration.invalid", "Server configuration is incomplete or invalid.", {
+          missing: validation.missing,
+          errors: validation.errors
+        });
+        throw Object.assign(new Error("Server configuration is incomplete or invalid."), {
+          code: "CONFIGURATION_ERROR",
+          status: 503,
+          expose: true,
+          metadata: { missingConfig: validation.missing }
+        });
+      }
+      const body = await handler(req, res);
+      logger.info("http.request.completed", "HTTP request completed.", {
+        path: req.path,
+        method: req.method,
+        statusCode: res.statusCode,
+        durationMs: Date.now() - startedAt
+      });
+      res.json({ ...body, correlationId: req.correlationId });
+    } catch (error) {
+      handleHttpError(error, req, res, logger, startedAt);
+    }
+  };
+
   app.get("/health", (req, res) => {
     const body = {
       status: "ok",
@@ -105,6 +136,7 @@ export function createApp({
     assertDiagnosticsAllowed(config);
     return serializeDiagnostic("openai", await handlers.verifyOpenAIConnection(), { enabled: true });
   }));
+  app.post("/api/session", publicRoute(req => createOperatorSession(req.body)));
   app.get("/api/audit/latest-import", route(handlers.latestImportAudit));
   app.get("/api/candidates", route(req => handlers.listCandidateInbox(req.query)));
   app.get("/api/import-runs/:runId/candidates", route(req => handlers.listRunCandidates(req.params.runId, req.query)));
