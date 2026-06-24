@@ -401,23 +401,15 @@ test("company technology exclusions reject matching Apollo organizations when pr
   assert.equal(candidates[0].email, "luis@other.com");
 });
 
-test("Apollo search falls back to selected roles without industry keyword", async () => {
+test("Apollo search does not remove industry filters without explicit relaxation", async () => {
   config.externalServicesMode = "live";
   config.apolloKey = "test-apollo-key";
   let calls = 0;
   globalThis.fetch = async (url, options) => {
     calls += 1;
     const payload = JSON.parse(options.body);
-    const people = payload.q_organization_keyword_tags ? [] : [{
-      id: "apollo-fallback-1",
-      first_name: "Ana",
-      last_name: "Diaz",
-      email: "ana@example.com",
-      email_status: "verified",
-      title: "Director Comercial",
-      phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
-      organization: { name: "Example", primary_domain: "example.com" }
-    }];
+    assert.ok(payload.q_organization_keyword_tags, "industry keyword must stay present in every search profile");
+    const people = [];
     return new Response(JSON.stringify({ people }), { status: 200 });
   };
   const candidates = await findApolloCandidates({
@@ -429,9 +421,8 @@ test("Apollo search falls back to selected roles without industry keyword", asyn
       roleTitles: ["No Match Role"]
     }
   });
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].email, "ana@example.com");
-  assert.equal(calls, 3);
+  assert.equal(candidates.length, 0);
+  assert.equal(calls, 2);
 });
 
 test("inferred title exclusions do not reject otherwise eligible Apollo candidates", async () => {

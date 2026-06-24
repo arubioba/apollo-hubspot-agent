@@ -169,8 +169,7 @@ function buildApolloSearchProfiles(filters) {
   const interpretedRoles = filters.interpretation?.roleTitles || selectedRoles;
   const profiles = [
     { name: "interpreted_industry_roles", industries, roleTitles: interpretedRoles },
-    { name: "selected_industry_roles", industries, roleTitles: selectedRoles },
-    { name: "selected_roles_without_industry_keyword", industries: [null], roleTitles: selectedRoles }
+    { name: "selected_industry_roles", industries, roleTitles: selectedRoles }
   ];
   return profiles
     .filter(profile => profile.roleTitles?.length)
