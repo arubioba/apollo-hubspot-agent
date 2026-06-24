@@ -7,7 +7,7 @@ import {
   validateAgentResultContract
 } from "../src/agent-contracts.js";
 import { toAraCandidate } from "../src/candidate-adapter.js";
-import { listAraCandidates, upsertAraCandidate } from "../src/candidate-repository.js";
+import { listAraCandidates, markAraCandidateHubSpotSynced, upsertAraCandidate } from "../src/candidate-repository.js";
 
 const context = {
   tenantId: "freelan",
@@ -135,5 +135,48 @@ test("candidate repository upserts and serializes rows with a fake client", asyn
   assert.equal(listed.pagination.total, 1);
   assert.equal(listed.candidates[0].email, "ana@example.com");
   assert.equal(calls.length, 2);
+});
+
+test("candidate repository marks HubSpot sync completion", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values) {
+      calls.push({ sql, values });
+      return {
+        rows: [{
+          candidate_id: "33333333-3333-4333-8333-333333333333",
+          tenant_id: "freelan",
+          campaign_id: "campaign-1",
+          run_id: context.runId,
+          hubspot_contact_id: "contact-1",
+          hubspot_company_id: "company-1",
+          apollo_person_id: "apollo-1",
+          contact_name: "Ana Diaz",
+          company_name: "Example",
+          job_title: "CIO",
+          professional_email: "ana@example.com",
+          lifecycle_status: "HUBSPOT_SYNCED",
+          approval_status: "PENDING",
+          hubspot_sync_status: "synced",
+          next_action: "hubspot_review",
+          evidence: [],
+          positive_factors: [],
+          created_at: "2026-06-23T00:00:00.000Z",
+          updated_at: "2026-06-23T00:00:00.000Z"
+        }]
+      };
+    }
+  };
+  const updated = await markAraCandidateHubSpotSynced({
+    tenantId: "freelan",
+    runId: context.runId,
+    email: "ana@example.com",
+    hubspotContactId: "contact-1",
+    hubspotCompanyId: "company-1"
+  }, client);
+  assert.equal(updated.status, "HUBSPOT_SYNCED");
+  assert.equal(updated.hubspot_sync_status, "synced");
+  assert.equal(updated.contact_id, "contact-1");
+  assert.equal(calls[0].values[2], "ana@example.com");
 });
 

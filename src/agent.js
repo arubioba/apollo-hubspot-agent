@@ -7,7 +7,7 @@ import { getCorrelationId } from "./context.js";
 import { ValidationError } from "./errors.js";
 import { logger } from "./logger.js";
 import { toAraCandidate } from "./candidate-adapter.js";
-import { upsertAraCandidates } from "./candidate-repository.js";
+import { markAraCandidateHubSpotSynced, upsertAraCandidates } from "./candidate-repository.js";
 
 const ICP_ROLES = [
   "CIO", "CTO", "Director de Tecnologia", "Chief Marketing Officer", "CMO",
@@ -165,7 +165,17 @@ async function executeBatch(batch, countAgainstLimit, filters) {
   for (const candidate of batch) {
     try {
       logger.info("hubspot.sync.started", "HubSpot candidate sync started.", { email: candidate.email });
-      successful.push(await importCandidate(candidate, filters));
+      const result = await importCandidate(candidate, filters);
+      successful.push(result);
+      if (!result.preview && result.contactId && filters.runId) {
+        await markAraCandidateHubSpotSynced({
+          tenantId: config.defaultTenantId,
+          runId: filters.runId,
+          email: candidate.email,
+          hubspotContactId: result.contactId,
+          hubspotCompanyId: result.companyId
+        });
+      }
       logger.info("hubspot.sync.completed", "HubSpot candidate sync completed.", { email: candidate.email });
     } catch (error) {
       logger.error("hubspot.sync.failed", "HubSpot candidate sync failed.", { email: candidate.email, error });

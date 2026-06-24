@@ -128,6 +128,30 @@ export async function listAraCandidates({ tenantId, runId, page = 1, pageSize = 
   };
 }
 
+export async function markAraCandidateHubSpotSynced({
+  tenantId,
+  runId,
+  email,
+  hubspotContactId,
+  hubspotCompanyId
+}, client = pool) {
+  const result = await client.query(`
+    UPDATE ara_candidates
+    SET
+      hubspot_contact_id = $4,
+      hubspot_company_id = $5,
+      lifecycle_status = 'HUBSPOT_SYNCED',
+      hubspot_sync_status = 'synced',
+      next_action = 'hubspot_review',
+      updated_at = now()
+    WHERE tenant_id = $1
+      AND run_id = $2
+      AND lower(professional_email) = lower($3)
+    RETURNING *
+  `, [tenantId, runId, email, hubspotContactId, hubspotCompanyId]);
+  return toPublicCandidate(result.rows[0]);
+}
+
 export function toPublicCandidate(row) {
   if (!row) return null;
   return {
