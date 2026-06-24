@@ -27,6 +27,8 @@ const schema = {
 };
 
 export async function interpretFilters(input) {
+  if (config.externalServicesMode === "mock") return mockInterpretation(input);
+
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -56,6 +58,10 @@ export async function interpretFilters(input) {
 }
 
 export async function verifyOpenAIConnection() {
+  if (config.externalServicesMode === "mock") {
+    return { ok: true, model: config.openaiModel, mode: "mock" };
+  }
+
   try {
     const response = await fetch("https://api.openai.com/v1/models", {
       headers: { Authorization: `Bearer ${config.openaiKey}` }
@@ -66,4 +72,80 @@ export async function verifyOpenAIConnection() {
   } catch (error) {
     return { ok: false, error: error.message };
   }
+}
+
+function mockInterpretation(input) {
+  const industryKeywords = unique([
+    input.industry,
+    ...expandIndustry(input.industry),
+    ...extractQuotedTerms(input.adHocBrief)
+  ]).slice(0, 8);
+  const roleTitles = unique((input.selectedRoles || []).flatMap(expandRole)).slice(0, 18);
+  return {
+    industryKeywords,
+    roleTitles,
+    seniorities: inferSeniorities(roleTitles),
+    companyKeywords: extractCompanySignals(input.adHocBrief).slice(0, 8),
+    contactLocations: unique(input.countries || []).slice(0, 8),
+    excludedTitles: [],
+    explanation: "Interpretacion mock generada localmente para staging; no llamo OpenAI real.",
+    relaxation: {
+      removeCompanyKeywords: false,
+      broadenEmployeeRangeByPercent: 20,
+      removeContactLocations: Boolean(input.countries?.length),
+      explanation: "Si no hay resultados, mantener industria y roles, retirar ubicaciones opcionales de contacto y ampliar rango de empleados."
+    }
+  };
+}
+
+function expandIndustry(industry = "") {
+  const value = normalize(industry);
+  const dictionary = [
+    { match: ["retail", "comercio", "minorista"], terms: ["Retail", "Commerce", "E-commerce", "Consumer Goods", "Tiendas", "Comercio minorista"] },
+    { match: ["financ", "banco", "bank", "fintech"], terms: ["Financial Services", "Fintech", "Banking", "Servicios financieros"] },
+    { match: ["manufact", "fabric", "industrial"], terms: ["Manufacturing", "Industrial", "Fabricacion", "Manufactura"] },
+    { match: ["tecnolog", "software", "saas"], terms: ["Technology", "Software", "SaaS", "Information Technology"] },
+    { match: ["farmaceut", "pharma", "salud"], terms: ["Pharmaceuticals", "Healthcare", "Life Sciences", "Farmaceutica"] },
+    { match: ["energia", "energy"], terms: ["Energy", "Oil & Energy", "Renewables", "Energia"] },
+    { match: ["distrib", "logistic"], terms: ["Distribution", "Logistics", "Wholesale", "Distribucion"] }
+  ];
+  return dictionary.find(item => item.match.some(term => value.includes(term)))?.terms || [industry];
+}
+
+function expandRole(role = "") {
+  const value = normalize(role);
+  const variants = [role];
+  if (/\bcio\b|tecnolog|technology|cto/.test(value)) variants.push("CIO", "CTO", "Director de Tecnologia", "IT Director", "Technology Director");
+  if (/marketing|cmo/.test(value)) variants.push("CMO", "Director de Marketing", "Marketing Director", "Head of Marketing");
+  if (/sales|ventas|comercial/.test(value)) variants.push("Sales Director", "Director Comercial", "Director de Ventas", "Commercial Director");
+  if (/\bceo\b|general/.test(value)) variants.push("CEO", "Director General", "Managing Director");
+  return variants;
+}
+
+function inferSeniorities(roles) {
+  const text = normalize(roles.join(" "));
+  const seniorities = [];
+  if (/\bceo\b|\bcto\b|\bcio\b|\bcmo\b|chief/.test(text)) seniorities.push("c_suite");
+  if (/director|head/.test(text)) seniorities.push("director");
+  return seniorities.length ? seniorities : ["director"];
+}
+
+function extractCompanySignals(brief = "") {
+  const text = String(brief || "");
+  return unique([
+    ...extractQuotedTerms(text),
+    ...["HubSpot", "CRM", "pipeline", "marketing", "ventas", "automatizacion"].filter(term => normalize(text).includes(normalize(term)))
+  ]);
+}
+
+function extractQuotedTerms(value = "") {
+  return [...String(value).matchAll(/["“”']([^"“”']{2,40})["“”']/g)].map(match => match[1].trim());
+}
+
+function unique(items) {
+  return [...new Map(items.filter(Boolean).map(item => [normalize(item), String(item).trim()])).values()];
+}
+
+function normalize(value = "") {
+  return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }

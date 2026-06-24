@@ -7,6 +7,7 @@ import { AuthenticationError, HubSpotWriteBlockedError } from "../src/errors.js"
 import { maskEmail, maskPhone, sanitize } from "../src/logger.js";
 import { assertHubSpotWriteAllowed } from "../src/write-guard.js";
 import { buildApolloSearchPayload, ensureHubSpotProperties, findApolloCandidates, importCandidate } from "../src/clients.js";
+import { interpretFilters, verifyOpenAIConnection } from "../src/interpreter.js";
 
 const original = {
   adminToken: config.adminToken,
@@ -178,6 +179,29 @@ test("invalid ARA_EXTERNAL_SERVICES_MODE is rejected", () => {
   const validation = validateConfig();
   assert.equal(validation.ok, false);
   assert.match(validation.errors.join(" "), /mock, sandbox, or live/);
+});
+
+test("mock external services mode interprets filters without calling OpenAI", async () => {
+  config.externalServicesMode = "mock";
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    throw new Error("fetch should not be called in mock mode");
+  };
+  const interpretation = await interpretFilters({
+    industry: "Retail",
+    selectedRoles: ["Director Comercial"],
+    countries: ["Mexico"],
+    employeeRange: [50, 5000],
+    adHocBrief: "Busca empresas con CRM y pipeline comercial."
+  });
+  const diagnostic = await verifyOpenAIConnection();
+  assert.equal(called, false);
+  assert.equal(diagnostic.ok, true);
+  assert.equal(diagnostic.mode, "mock");
+  assert.ok(interpretation.industryKeywords.includes("Retail"));
+  assert.ok(interpretation.roleTitles.includes("Director Comercial"));
+  assert.ok(interpretation.companyKeywords.includes("CRM"));
 });
 
 test("write guard blocks HubSpot writes in disabled mode", () => {
