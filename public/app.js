@@ -26,8 +26,15 @@ const agents = [
 async function boot() {
   setSystem("Starting", "Inicializando consola ARA.");
   renderTimeline("orchestrator", []);
-  await startRun();
   bindEvents();
+  updateTokenButton();
+  if (!adminToken) {
+    clearFeed();
+    addFeed("Revenue Orchestrator", "Antes de iniciar, carga el token interno con el boton Token.");
+    setSystem("Needs token", "Carga el token interno para activar la consola.");
+    return;
+  }
+  await startRun();
   setSystem("Ready", "Consola lista para configurar una campana.");
 }
 
@@ -58,6 +65,8 @@ function bindEvents() {
   actions.token.onclick = () => {
     adminToken = prompt("Token interno ARA", adminToken) || "";
     sessionStorage.setItem("araAdminToken", adminToken);
+    updateTokenButton();
+    if (adminToken) startRun().catch(showError);
   };
   actions.newRun.onclick = () => startRun().catch(showError);
   actions.editFilters.onclick = () => {
@@ -257,6 +266,10 @@ async function call(path, body = {}, method = "POST") {
   if (!adminToken) {
     adminToken = prompt("Token interno ARA") || "";
     sessionStorage.setItem("araAdminToken", adminToken);
+    updateTokenButton();
+  }
+  if (!adminToken) {
+    throw new Error("Carga el token interno ARA para activar la consola.");
   }
   const response = await fetch(path, {
     method,
@@ -269,9 +282,20 @@ async function call(path, body = {}, method = "POST") {
     const error = new Error(message);
     error.code = data.error?.code;
     error.correlationId = data.correlation_id || data.correlationId;
+    if (response.status === 401) {
+      adminToken = "";
+      sessionStorage.removeItem("araAdminToken");
+      updateTokenButton();
+      error.message = "Token interno invalido o ausente. Da clic en Token, carga el valor correcto y reintenta.";
+    }
     throw error;
   }
   return data;
+}
+
+function updateTokenButton() {
+  actions.token.textContent = adminToken ? "Token cargado" : "Token";
+  actions.token.classList.toggle("ready", Boolean(adminToken));
 }
 
 async function safeJson(response) {
