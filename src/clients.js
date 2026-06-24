@@ -41,6 +41,15 @@ async function hubspot(path, options = {}) {
 }
 
 export async function findApolloCandidates(filters, page = 1) {
+  if (config.externalServicesMode === "mock") {
+    logger.info("apollo.mock_search.used", "Mock Apollo candidates generated for external services mock mode.", {
+      page,
+      industry: filters.industry,
+      roles: filters.roles
+    });
+    return mockApolloCandidates(filters, page);
+  }
+
   for (const profile of buildApolloSearchProfiles(filters)) {
     const results = [];
     for (const industry of profile.industries) {
@@ -58,6 +67,64 @@ export async function findApolloCandidates(filters, page = 1) {
     if (candidates.length) return candidates;
   }
   return [];
+}
+
+function mockApolloCandidates(filters, page = 1) {
+  if (page > 1) return [];
+  const roles = filters.roles?.length ? filters.roles : ["Director Comercial"];
+  const industryTerms = filters.interpretation?.industryKeywords?.length
+    ? filters.interpretation.industryKeywords
+    : [filters.industry];
+  const companies = mockCompanies(filters, industryTerms);
+  return companies.flatMap((company, companyIndex) => roles.slice(0, 3).map((role, roleIndex) => ({
+    apolloId: `mock-${page}-${companyIndex}-${roleIndex}`,
+    firstName: ["Ana", "Luis", "Mariana", "Carlos", "Sofia", "Diego", "Laura", "Ricardo"][companyIndex + roleIndex] || "Alex",
+    lastName: ["Gomez", "Torres", "Diaz", "Lopez", "Mendez", "Ruiz", "Herrera", "Vargas"][companyIndex + roleIndex] || "Mock",
+    email: `${slug(role)}.${companyIndex + roleIndex + 1}@${company.domain}`,
+    emailVerified: true,
+    title: role,
+    linkedin: `https://linkedin.com/in/mock-${companyIndex}-${roleIndex}`,
+    city: company.city,
+    state: "",
+    country: company.country,
+    validPhones: [{ type: roleIndex % 2 ? "direct" : "mobile", sanitized_number: `+52550000${String(companyIndex + 10).padStart(2, "0")}${String(roleIndex + 10).padStart(2, "0")}` }],
+    company
+  }))).slice(0, Math.max(5, Math.min(25, Number(filters.quantity || 10))));
+}
+
+function mockCompanies(filters, industryTerms) {
+  const countries = filters.countries?.length ? filters.countries : ["Mexico"];
+  const industry = industryTerms[0] || filters.industry || "Industry";
+  return [
+    ["Nexa Retail Group", "nexaretail.example", "Mexico"],
+    ["Omni Commerce Latam", "omnicommerce.example", "Mexico"],
+    ["Andes Customer Stores", "andescustomerstores.example", "Colombia"],
+    ["Punto Venta Digital", "puntoventadigital.example", "Mexico"],
+    ["Mercado Operaciones", "mercadooperaciones.example", "Colombia"],
+    ["Retail Pipeline Co", "retailpipeline.example", "Mexico"],
+    ["Commerce Enablement", "commerceenablement.example", "Mexico"],
+    ["Distribuidora ICP", "distribuidoraicp.example", "Colombia"]
+  ].filter(([, , country]) => countries.includes(country)).map(([name, domain, country], index) => ({
+    name,
+    domain,
+    website: `https://${domain}`,
+    phone: `+52551111${String(index).padStart(4, "0")}`,
+    city: country === "Colombia" ? "Bogota" : "Ciudad de Mexico",
+    state: "",
+    country,
+    zip: "",
+    linkedin: `https://linkedin.com/company/${domain.split(".")[0]}`,
+    employees: Math.min(filters.employeeMax || 5000, Math.max(filters.employeeMin || 50, 250 + (index * 175))),
+    keywords: unique([industry, filters.industry, ...(filters.interpretation?.companyKeywords || []), "CRM", "pipeline comercial"])
+  }));
+}
+
+function slug(value = "") {
+  return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "") || "contact";
+}
+
+function unique(items) {
+  return [...new Set(items.map(item => String(item || "").trim()).filter(Boolean))];
 }
 
 function normalizeAndFilterCandidates(results) {

@@ -235,6 +235,7 @@ test("disabled mode blocks import before any real API call", async () => {
 });
 
 test("Apollo search returns eligible mocked candidates", async () => {
+  config.externalServicesMode = "live";
   config.apolloKey = "test-apollo-key";
   globalThis.fetch = async () => new Response(JSON.stringify({
     people: [{
@@ -251,6 +252,31 @@ test("Apollo search returns eligible mocked candidates", async () => {
   const candidates = await findApolloCandidates(searchFilters());
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].email, "ana@example.com");
+});
+
+test("mock external services mode returns Apollo candidates without network", async () => {
+  config.externalServicesMode = "mock";
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    throw new Error("fetch should not be called in mock mode");
+  };
+  const candidates = await findApolloCandidates({
+    ...searchFilters(),
+    industry: "Retail",
+    roles: ["Director Comercial"],
+    quantity: 5,
+    interpretation: {
+      ...searchFilters().interpretation,
+      industryKeywords: ["Retail", "Commerce"],
+      companyKeywords: ["CRM"]
+    }
+  });
+  assert.equal(called, false);
+  assert.equal(candidates.length, 5);
+  assert.equal(candidates.every(candidate => candidate.emailVerified), true);
+  assert.equal(candidates.every(candidate => candidate.company.domain), true);
+  assert.equal(candidates.every(candidate => candidate.validPhones.length), true);
 });
 
 test("Apollo payload uses only current console filters and approved expansions", () => {
@@ -287,6 +313,7 @@ test("Apollo payload uses only current console filters and approved expansions",
 });
 
 test("Apollo search falls back to selected roles without industry keyword", async () => {
+  config.externalServicesMode = "live";
   config.apolloKey = "test-apollo-key";
   let calls = 0;
   globalThis.fetch = async (url, options) => {
@@ -319,6 +346,7 @@ test("Apollo search falls back to selected roles without industry keyword", asyn
 });
 
 test("inferred title exclusions do not reject otherwise eligible Apollo candidates", async () => {
+  config.externalServicesMode = "live";
   globalThis.fetch = async () => new Response(JSON.stringify({
     people: [{
       id: "apollo-3",
@@ -342,6 +370,7 @@ test("inferred title exclusions do not reject otherwise eligible Apollo candidat
 });
 
 test("candidate without mappable phone is rejected by current filter", async () => {
+  config.externalServicesMode = "live";
   globalThis.fetch = async () => new Response(JSON.stringify({
     people: [{
       id: "apollo-2",
@@ -356,11 +385,13 @@ test("candidate without mappable phone is rejected by current filter", async () 
 });
 
 test("Apollo 429 is classified as rate limit error", async () => {
+  config.externalServicesMode = "live";
   globalThis.fetch = async () => new Response(JSON.stringify({ error: "rate limit" }), { status: 429 });
   await assert.rejects(() => findApolloCandidates(searchFilters()), /Apollo rate limit exceeded/);
 });
 
 test("Apollo non-rate error is classified safely", async () => {
+  config.externalServicesMode = "live";
   globalThis.fetch = async () => new Response(JSON.stringify({ error: "provider down" }), { status: 500 });
   await assert.rejects(() => findApolloCandidates(searchFilters()), /Apollo request failed/);
 });
