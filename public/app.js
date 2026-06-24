@@ -155,14 +155,23 @@ async function finalImport(code) {
 }
 async function renderRunCandidates(runId) {
   try {
-    const data = await call(`/api/import-runs/${runId}/candidates?page_size=5`, {}, "GET");
+    let data = await call(`/api/candidates?run_id=${encodeURIComponent(runId)}&page_size=5`, {}, "GET");
+    if (!data.candidates?.length) data = await call(`/api/import-runs/${runId}/candidates?page_size=5`, {}, "GET");
     renderCandidates(data.candidates || []);
   } catch(error) {
     say(`No pude cargar candidatos: ${error.message}`);
     renderCandidates(run.candidates.slice(0,5));
   }
 }
-function renderCandidates(items){ say(items.map(x=>`${x.name || `${x.firstName || ""} ${x.lastName || ""}`.trim()} | ${x.title || ""} | ${x.company?.name || x.company || ""} | ${x.email || ""} | ${x.status || "candidate"}`).join("\n")); }
+function renderCandidates(items){
+  say(items.map(x => {
+    const name = x.name || `${x.firstName || ""} ${x.lastName || ""}`.trim();
+    const company = x.company?.name || x.company || "";
+    const score = x.opportunity_score ?? x.icp_score ?? "";
+    const evidence = (x.evidence || []).slice(0, 2).map(item => item.message || item.code).filter(Boolean).join("; ");
+    return `${name} | ${x.title || ""} | ${company} | ${x.email || ""} | Score: ${score} | Estado: ${x.lifecycle_status || x.status || "candidate"} | Siguiente: ${x.next_action || "commercial_approval"}${evidence ? ` | Evidencia: ${evidence}` : ""}`;
+  }).join("\n"));
+}
 function renderReport(r){ say(`Exitosos: ${r.successful?.length||0}\nFallidos: ${r.failed?.length||0}\n${(r.failed||[]).map(x=>`${x.email}: ${x.error}`).join("\n")}`); }
 function escapeHtml(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 boot().catch(e=>say(`No se pudo iniciar: ${e.message}`));

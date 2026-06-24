@@ -6,6 +6,8 @@ import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db
 import { getCorrelationId } from "./context.js";
 import { ValidationError } from "./errors.js";
 import { logger } from "./logger.js";
+import { toAraCandidate } from "./candidate-adapter.js";
+import { upsertAraCandidates } from "./candidate-repository.js";
 
 const ICP_ROLES = [
   "CIO", "CTO", "Director de Tecnologia", "Chief Marketing Officer", "CMO",
@@ -77,10 +79,19 @@ export async function approveRoles(id) {
     logger.info("apollo.search.completed", "Apollo candidate search completed.", { runId: run.id, page, candidateCount: candidates.length });
   }
   run.candidates = uniqueByEmail(candidates).slice(0, run.filters.quantity + config.testBatchSize);
+  const araCandidates = run.candidates.map(candidate => toAraCandidate(candidate, {
+    tenantId: config.defaultTenantId,
+    campaignId: run.id,
+    runId: run.id,
+    correlationId: run.correlationId || getCorrelationId(),
+    filters: run.filters
+  }));
+  const savedAraCandidates = await upsertAraCandidates(araCandidates);
   run.phase = "test_ready";
   await saveRun(run);
   return {
     run,
+    araCandidates: savedAraCandidates,
     message: run.candidates.length
       ? `Encontre ${run.candidates.length} candidatos elegibles. La prueba usara los primeros ${Math.min(config.testBatchSize, run.candidates.length)}.`
       : "No encontre candidatos. Revisa la propuesta para relajar filtros antes de volver a buscar.",
@@ -104,6 +115,10 @@ export async function applyRelaxation(id) {
 
 export async function executeTest(id) {
   const run = await requiredRun(id);
+  logger.info("legacy.execute_test.used", "Legacy compatibility preview path used.", {
+    runId: run.id,
+    retirementCriteria: "Retire after ARA Candidate approval, preview, and controlled HubSpot sync reach parity."
+  });
   const batch = run.candidates.slice(0, config.testBatchSize);
   if (config.writeMode === "enabled") await ensureHubSpotProperties();
   run.testResults = await executeBatch(batch, false, run.filters);

@@ -19,6 +19,7 @@
 | `NODE_ENV` | `development` | `development`, `test`, `staging`, `production` |
 | `PORT` | `3000` | HTTP port |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model |
+| `ARA_DEFAULT_TENANT_ID` | `freelan` | Internal MVP tenant context; future tenant onboarding will replace this |
 | `ARA_WRITE_MODE` | `disabled` | `disabled`, `preview`, `enabled` |
 | `ARA_EXTERNAL_SERVICES_MODE` | `mock` | Service intent: `mock`, `sandbox`, `live`; runtime switching is deferred to Connector Extraction |
 | `ARA_DIAGNOSTICS_ENABLED` | `false` | Enables protected technical diagnostics when explicitly set to `true` |
@@ -48,6 +49,7 @@ Use these defaults for the first isolated Railway staging environment:
 ```text
 NODE_ENV=staging
 ARA_WRITE_MODE=disabled
+ARA_DEFAULT_TENANT_ID=freelan
 ARA_EXTERNAL_SERVICES_MODE=mock
 ARA_DIAGNOSTICS_ENABLED=false
 ARA_RATE_LIMIT_ENABLED=true

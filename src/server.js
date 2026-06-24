@@ -7,6 +7,7 @@ import { closeDb, getLatestSuccessfulRun, initDb } from "./db.js";
 import { logger } from "./logger.js";
 import { serializeAuditRun, serializeRunCandidates } from "./http-serializers.js";
 import { loadRun } from "./db.js";
+import { listAraCandidates } from "./candidate-repository.js";
 
 let dbReady = false;
 let dbError = null;
@@ -24,7 +25,8 @@ const handlers = {
   executeTest,
   executeFinal,
   latestImportAudit,
-  listRunCandidates
+  listRunCandidates,
+  listCandidateInbox
 };
 
 async function latestImportAudit() {
@@ -33,9 +35,34 @@ async function latestImportAudit() {
 }
 
 async function listRunCandidates(runId, query) {
+  const page = Math.max(1, Number(query.page || 1));
+  const pageSize = Math.min(100, Math.max(1, Number(query.page_size || 25)));
+  const inbox = await listAraCandidates({
+    tenantId: config.defaultTenantId,
+    runId,
+    page,
+    pageSize
+  });
+  if (inbox.candidates.length) {
+    return {
+      run: { id: runId, status: "candidate_inbox" },
+      pagination: inbox.pagination,
+      candidates: inbox.candidates
+    };
+  }
   const run = await loadRun(runId);
   if (!run) return { found: false, candidates: [], pagination: { page: 1, page_size: 25, total: 0 } };
   return serializeRunCandidates(run, {
+    page,
+    pageSize
+  });
+}
+
+async function listCandidateInbox(query) {
+  if (!query.run_id) return { candidates: [], pagination: { page: 1, page_size: 25, total: 0 } };
+  return listAraCandidates({
+    tenantId: config.defaultTenantId,
+    runId: query.run_id,
     page: Math.max(1, Number(query.page || 1)),
     pageSize: Math.min(100, Math.max(1, Number(query.page_size || 25)))
   });

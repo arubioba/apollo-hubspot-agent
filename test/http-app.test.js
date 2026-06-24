@@ -48,6 +48,20 @@ function makeHandlers(overrides = {}) {
     applyRelaxation: async () => ({ run: { id: "run-1", candidates: [] }, message: "relaxed" }),
     executeTest: async () => ({ run: { id: "run-1" }, message: "Preview terminado. No se escribio en HubSpot." }),
     executeFinal: async () => ({ run: { id: "run-1" }, missing: 0, message: "Preview terminado." }),
+    listCandidateInbox: async () => ({
+      pagination: { page: 1, page_size: 25, total: 1 },
+      candidates: [{
+        candidate_id: "candidate-1",
+        name: "Ana Diaz",
+        company: "Example",
+        title: "CIO",
+        email: "ana@example.com",
+        opportunity_score: 91,
+        lifecycle_status: "RECOMMENDED",
+        next_action: "commercial_approval",
+        evidence: [{ code: "verified_email", message: "Email laboral verificado." }]
+      }]
+    }),
     listRunCandidates: async () => ({
       run: { id: "run-1", status: "test_ready" },
       pagination: { page: 1, page_size: 25, total: 1 },
@@ -443,6 +457,19 @@ test("candidate endpoint returns operational candidate list", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.body.candidates[0].email, "ana@example.com");
   assert.equal("rawPayload" in response.body.candidates[0], false);
+});
+
+test("candidate inbox endpoint returns durable ARA candidates", async () => {
+  const { app } = makeApp();
+  const response = await request(app, {
+    method: "GET",
+    url: "/api/candidates?run_id=run-1",
+    headers: { "X-ARA-Admin-Token": "valid-token" }
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.candidates[0].candidate_id, "candidate-1");
+  assert.equal(response.body.candidates[0].opportunity_score, 91);
+  assert.equal(response.body.candidates[0].next_action, "commercial_approval");
 });
 
 test("database errors are sanitized", async () => {

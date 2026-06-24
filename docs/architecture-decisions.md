@@ -187,3 +187,60 @@ Consequence:
 
 - A4 staging defaults to `mock`.
 - `src/clients.js` behavior is not changed by this variable yet.
+
+## ADR-016 - ARA Candidate Is The Central Commercial Entity
+
+Decision: ARA introduces `ARA Candidate` as a durable commercial entity separate from HubSpot contacts.
+
+Rationale:
+
+- Discovery must not automatically imply HubSpot synchronization.
+- Operators need to review candidates before CRM writes.
+- Future agents need a shared entity for evidence, scores, approval and handoff.
+
+Consequence:
+
+- Current `import_runs.candidates` remains for compatibility.
+- B2 starts with Candidate Repository and adapter from current Apollo-normalized candidates.
+
+## ADR-017 - Agent Handoffs Require Validated Results
+
+Decision: A candidate must not advance to another agent only because it was saved in the database. Each handoff requires structured result, evidence, confidence, state, next action, correlation ID, agent version and audit event.
+
+Rationale:
+
+- ARA is an operating system, not passive storage.
+- Handoffs must be explainable, resumable and auditable.
+
+Consequence:
+
+- The Orchestrator validates agent results before invoking the next agent.
+- MVP may execute synchronously, but contracts remain async-ready.
+
+## ADR-018 - Approval Status Is Separate From Lifecycle Status
+
+Decision: `lifecycle_status` represents the candidate's commercial/operational state; `approval_status` represents human governance. Approval is stored as a durable event.
+
+Rationale:
+
+- Operators need simple labels and clear actions.
+- Governance decisions must be auditable.
+
+Consequence:
+
+- Candidate rows store current aggregate statuses.
+- `ara_approvals` stores the decision history.
+
+## ADR-019 - MVP Tenant Is Freelan But Tenant Context Is Required
+
+Decision: MVP uses `freelan` as the default tenant through `ARA_DEFAULT_TENANT_ID=freelan`, but interfaces, contracts, repositories, idempotency keys and audit events require tenant context.
+
+Rationale:
+
+- Internal Freelan MVP must move quickly.
+- Future client deployments should not require rewriting domain contracts.
+
+Consequence:
+
+- No tenant onboarding, dynamic credentials, billing or tenant RBAC in B1/B2.
+- New components must receive tenant context instead of hardcoding `freelan` in business logic.
