@@ -194,11 +194,17 @@ function getIndustrySearchTerms(filters) {
 export function normalizeCandidate(person) {
   const organization = person.organization || person.account || {};
   const phones = person.phone_numbers || [];
-  const organizationSignals = unique([
+  const industries = unique([
     organization.industry,
+    organization.primary_industry,
     ...(organization.industries || []),
-    ...(organization.industry_keywords || []),
+    ...(organization.industry_keywords || [])
+  ].map(signalToText));
+  const keywords = unique([
     ...(organization.keywords || []),
+    ...(organization.tags || [])
+  ].map(signalToText));
+  const technologies = unique([
     ...(organization.technologies || []),
     ...(organization.current_technologies || []),
     ...(organization.technology_names || [])
@@ -227,7 +233,9 @@ export function normalizeCandidate(person) {
       linkedin: organization.linkedin_url || "",
       employees: organization.estimated_num_employees || organization.num_employees || null,
       industry: organization.industry || organization.primary_industry || "",
-      keywords: organizationSignals
+      industries,
+      keywords,
+      technologies
     }
   };
 }
@@ -245,7 +253,8 @@ function companyMatchesExcludedKeywords(candidate, excludedKeywords = []) {
     company.name,
     company.domain,
     company.website,
-    ...(company.keywords || [])
+    ...(company.keywords || []),
+    ...(company.technologies || [])
   ].join(" "));
   return exclusions.some(term => haystack.includes(term));
 }
@@ -262,7 +271,8 @@ function companyLooksLikeAdjacentProvider(candidate, filters = {}) {
     company.domain,
     company.website,
     company.industry,
-    ...(company.keywords || [])
+    ...(company.industries || []),
+    ...(company.technologies || [])
   ].join(" "));
   return /\b(software|saas|technology|tecnologia|computer software|information technology|it services|software development)\b/.test(haystack);
 }

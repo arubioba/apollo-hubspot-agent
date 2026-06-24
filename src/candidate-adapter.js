@@ -113,7 +113,7 @@ function matchesRequestedIndustry(candidate, filters) {
     candidate.company?.name,
     candidate.company?.domain,
     candidate.company?.industry,
-    ...(candidate.company?.keywords || [])
+    ...(candidate.company?.industries || [])
   ].filter(Boolean).join(" "));
   if (!terms.length) return true;
   return terms.some(term => haystack.includes(term) || term.includes(haystack));

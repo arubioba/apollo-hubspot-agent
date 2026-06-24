@@ -440,6 +440,7 @@ test("non-technology ICP rejects software vendors that only serve the requested 
         name: "Parrot",
         primary_domain: "parrotsoftware.io",
         industry: "Software Development",
+        industries: ["Information Technology", "Computer Software"],
         keywords: ["Hospitality", "Restaurant software", "Automation"]
       }
     }]
@@ -456,6 +457,45 @@ test("non-technology ICP rejects software vendors that only serve the requested 
       seniorities: ["director"],
       contactLocations: [],
       companyKeywords: ["automatizacion"],
+      excludedCompanyKeywords: [],
+      excludedTitles: []
+    }
+  });
+  assert.equal(candidates.length, 0);
+});
+
+test("industry matching ignores marketing keywords when real Apollo industries do not match", async () => {
+  config.externalServicesMode = "live";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    people: [{
+      id: "apollo-keyword-noise",
+      first_name: "Rodrigo",
+      last_name: "Diaz",
+      email: "rodrigo.diaz@parrotsoftware.io",
+      email_status: "verified",
+      title: "Head of Marketing",
+      phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
+      organization: {
+        name: "Parrot",
+        primary_domain: "parrotsoftware.io",
+        industry: "Information Technology",
+        industries: ["Computer Software"],
+        keywords: ["hospitality", "e-commerce"]
+      }
+    }]
+  }), { status: 200 });
+  const candidates = await findApolloCandidates({
+    employeeMin: 50,
+    employeeMax: 200,
+    countries: ["Mexico"],
+    roles: ["Director de Marketing"],
+    industry: "Hospitalidad",
+    interpretation: {
+      industryKeywords: ["Hospitality", "Hosteleria"],
+      roleTitles: ["Head of Marketing"],
+      seniorities: ["manager"],
+      contactLocations: [],
+      companyKeywords: [],
       excludedCompanyKeywords: [],
       excludedTitles: []
     }
