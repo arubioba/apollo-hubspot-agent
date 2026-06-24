@@ -283,6 +283,7 @@ export async function importCandidate(candidate, filters) {
   const contactIncoming = {
     ...contactProperties(candidate),
     ...araIncoming,
+    ara_engagement_prep_notes: buildEngagementPrepNote(candidate, filters),
     freelan_icp_match_context: araIncoming.ara_icp_match_context
   };
   const companyIncoming = {

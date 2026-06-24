@@ -220,6 +220,7 @@ test("preview mode returns planned properties without calling fetch", async () =
   assert.equal(result.preview, true);
   assert.equal(result.email, "ana@example.com");
   assert.equal(result.contactProperties.hs_whatsapp_phone_number, "+525511112222");
+  assert.match(result.contactProperties.ara_engagement_prep_notes, /Contexto de la empresa/);
   assert.equal(called, false);
 });
 
