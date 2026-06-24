@@ -41,17 +41,26 @@ async function hubspot(path, options = {}) {
 }
 
 export async function findApolloCandidates(filters, page = 1) {
-  const results = [];
-  for (const industry of getIndustrySearchTerms(filters)) {
-    const payload = buildApolloSearchPayload(filters, industry, page);
-    logger.info("apollo.search.payload", "Apollo search payload prepared from current console filters.", {
-      page,
-      industry,
-      keys: Object.keys(payload)
-    });
-    const data = await apollo("/contacts/search", payload);
-    results.push(...(data.people || data.contacts || []));
+  for (const profile of buildApolloSearchProfiles(filters)) {
+    const results = [];
+    for (const industry of profile.industries) {
+      const payload = buildApolloSearchPayload(filters, industry, page, profile);
+      logger.info("apollo.search.payload", "Apollo search payload prepared from current console filters.", {
+        page,
+        profile: profile.name,
+        industry: industry || "none",
+        keys: Object.keys(payload)
+      });
+      const data = await apollo("/contacts/search", payload);
+      results.push(...(data.people || data.contacts || []));
+    }
+    const candidates = normalizeAndFilterCandidates(results);
+    if (candidates.length) return candidates;
   }
+  return [];
+}
+
+function normalizeAndFilterCandidates(results) {
   return [...new Map(results.map(person => [person.id, person])).values()].map(person => {
     const candidate = normalizeCandidate(person);
     logger.debug("candidate.normalized", "Candidate normalized.", { email: candidate.email, apolloId: candidate.apolloId });
@@ -64,18 +73,34 @@ export async function findApolloCandidates(filters, page = 1) {
     });
 }
 
-export function buildApolloSearchPayload(filters, industry, page = 1) {
+export function buildApolloSearchPayload(filters, industry, page = 1, profile = {}) {
   return compact({
     page,
     per_page: 100,
     organization_num_employees_ranges: [`${filters.employeeMin},${filters.employeeMax}`],
     organization_locations: filters.countries,
-    q_organization_keyword_tags: [industry],
-    person_titles: filters.interpretation?.roleTitles || filters.roles,
-    person_seniorities: filters.interpretation?.seniorities || [],
+    q_organization_keyword_tags: industry ? [industry] : undefined,
+    person_titles: profile.roleTitles || filters.interpretation?.roleTitles || filters.roles,
     include_similar_titles: true,
     contact_email_status: ["verified"]
   });
+}
+
+function buildApolloSearchProfiles(filters) {
+  const industries = getIndustrySearchTerms(filters);
+  const selectedRoles = filters.roles || [];
+  const interpretedRoles = filters.interpretation?.roleTitles || selectedRoles;
+  const profiles = [
+    { name: "interpreted_industry_roles", industries, roleTitles: interpretedRoles },
+    { name: "selected_industry_roles", industries, roleTitles: selectedRoles },
+    { name: "selected_roles_without_industry_keyword", industries: [null], roleTitles: selectedRoles }
+  ];
+  return profiles
+    .filter(profile => profile.roleTitles?.length)
+    .filter((profile, index, all) => all.findIndex(other =>
+      JSON.stringify(other.industries) === JSON.stringify(profile.industries)
+      && JSON.stringify(other.roleTitles) === JSON.stringify(profile.roleTitles)
+    ) === index);
 }
 
 function getIndustrySearchTerms(filters) {

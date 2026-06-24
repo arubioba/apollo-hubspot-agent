@@ -223,13 +223,45 @@ test("Apollo payload uses only current console filters and approved expansions",
     organization_locations: ["Mexico", "Colombia"],
     q_organization_keyword_tags: ["Manufacturing"],
     person_titles: ["Director Comercial", "Commercial Director"],
-    person_seniorities: ["director"],
     include_similar_titles: true,
     contact_email_status: ["verified"]
   });
   assert.equal("person_locations" in payload, false);
+  assert.equal("person_seniorities" in payload, false);
   assert.equal("excludedTitles" in payload, false);
   assert.equal("companyKeywords" in payload, false);
+});
+
+test("Apollo search falls back to selected roles without industry keyword", async () => {
+  config.apolloKey = "test-apollo-key";
+  let calls = 0;
+  globalThis.fetch = async (url, options) => {
+    calls += 1;
+    const payload = JSON.parse(options.body);
+    const people = payload.q_organization_keyword_tags ? [] : [{
+      id: "apollo-fallback-1",
+      first_name: "Ana",
+      last_name: "Diaz",
+      email: "ana@example.com",
+      email_status: "verified",
+      title: "Director Comercial",
+      phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
+      organization: { name: "Example", primary_domain: "example.com" }
+    }];
+    return new Response(JSON.stringify({ people }), { status: 200 });
+  };
+  const candidates = await findApolloCandidates({
+    ...searchFilters(),
+    roles: ["Director Comercial"],
+    interpretation: {
+      ...searchFilters().interpretation,
+      industryKeywords: ["No Match"],
+      roleTitles: ["No Match Role"]
+    }
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].email, "ana@example.com");
+  assert.equal(calls, 3);
 });
 
 test("inferred title exclusions do not reject otherwise eligible Apollo candidates", async () => {
