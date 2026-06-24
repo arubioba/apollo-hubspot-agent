@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "node scripts/check-syntax.js",
+    "check": "npm run lint && npm test",
+    "smoke:staging": "node scripts/staging-smoke.js"
   },
   "engines": {
     "node": ">=20"
