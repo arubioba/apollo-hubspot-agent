@@ -425,6 +425,77 @@ test("Apollo search does not remove industry filters without explicit relaxation
   assert.equal(calls, 2);
 });
 
+test("non-technology ICP rejects software vendors that only serve the requested industry", async () => {
+  config.externalServicesMode = "live";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    people: [{
+      id: "apollo-parrot",
+      first_name: "Rodrigo",
+      last_name: "Diaz",
+      email: "rodrigo.diaz@parrotsoftware.io",
+      email_status: "verified",
+      title: "Head of Marketing",
+      phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
+      organization: {
+        name: "Parrot",
+        primary_domain: "parrotsoftware.io",
+        industry: "Software Development",
+        keywords: ["Hospitality", "Restaurant software", "Automation"]
+      }
+    }]
+  }), { status: 200 });
+  const candidates = await findApolloCandidates({
+    employeeMin: 50,
+    employeeMax: 200,
+    countries: ["Mexico"],
+    roles: ["Director de Marketing"],
+    industry: "Hospitalidad",
+    interpretation: {
+      industryKeywords: ["Hospitality", "Hosteleria"],
+      roleTitles: ["Director de Marketing", "Head of Marketing"],
+      seniorities: ["director"],
+      contactLocations: [],
+      companyKeywords: ["automatizacion"],
+      excludedCompanyKeywords: [],
+      excludedTitles: []
+    }
+  });
+  assert.equal(candidates.length, 0);
+});
+
+test("technology ICP can include software companies", async () => {
+  config.externalServicesMode = "live";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    people: [{
+      id: "apollo-software",
+      first_name: "Ana",
+      last_name: "Diaz",
+      email: "ana@example-software.com",
+      email_status: "verified",
+      title: "CTO",
+      phone_numbers: [{ type: "mobile", sanitized_number: "+525511112222" }],
+      organization: {
+        name: "Example Software",
+        primary_domain: "example-software.com",
+        industry: "Software Development",
+        keywords: ["Technology", "Software"]
+      }
+    }]
+  }), { status: 200 });
+  const candidates = await findApolloCandidates({
+    ...searchFilters(),
+    industry: "Tecnologia",
+    roles: ["CTO"],
+    interpretation: {
+      ...searchFilters().interpretation,
+      industryKeywords: ["Technology", "Software"],
+      roleTitles: ["CTO"]
+    }
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].email, "ana@example-software.com");
+});
+
 test("inferred title exclusions do not reject otherwise eligible Apollo candidates", async () => {
   config.externalServicesMode = "live";
   globalThis.fetch = async () => new Response(JSON.stringify({

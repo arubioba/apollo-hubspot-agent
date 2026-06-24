@@ -107,12 +107,12 @@ function titleMatches(title = "", roles = []) {
 function matchesRequestedIndustry(candidate, filters) {
   const terms = [
     filters.industry,
-    ...(filters.interpretation?.industryKeywords || []),
-    ...(filters.interpretation?.companyKeywords || [])
+    ...(filters.interpretation?.industryKeywords || [])
   ].map(normalizeText).filter(Boolean);
   const haystack = normalizeText([
     candidate.company?.name,
     candidate.company?.domain,
+    candidate.company?.industry,
     ...(candidate.company?.keywords || [])
   ].filter(Boolean).join(" "));
   if (!terms.length) return true;

@@ -147,6 +147,11 @@ function normalizeAndFilterCandidates(results, filters = {}) {
       const rejected = companyMatchesExcludedKeywords(c, filters.interpretation?.excludedCompanyKeywords || []);
       if (rejected) logger.debug("candidate.rejected", "Candidate rejected by company exclusion filters.", { email: c.email, company: c.company.name });
       return !rejected;
+    })
+    .filter(c => {
+      const rejected = companyLooksLikeAdjacentProvider(c, filters);
+      if (rejected) logger.debug("candidate.rejected", "Candidate rejected as adjacent provider noise.", { email: c.email, company: c.company.name });
+      return !rejected;
     });
 }
 
@@ -190,6 +195,9 @@ export function normalizeCandidate(person) {
   const organization = person.organization || person.account || {};
   const phones = person.phone_numbers || [];
   const organizationSignals = unique([
+    organization.industry,
+    ...(organization.industries || []),
+    ...(organization.industry_keywords || []),
     ...(organization.keywords || []),
     ...(organization.technologies || []),
     ...(organization.current_technologies || []),
@@ -218,6 +226,7 @@ export function normalizeCandidate(person) {
       zip: organization.postal_code || "",
       linkedin: organization.linkedin_url || "",
       employees: organization.estimated_num_employees || organization.num_employees || null,
+      industry: organization.industry || organization.primary_industry || "",
       keywords: organizationSignals
     }
   };
@@ -239,6 +248,23 @@ function companyMatchesExcludedKeywords(candidate, excludedKeywords = []) {
     ...(company.keywords || [])
   ].join(" "));
   return exclusions.some(term => haystack.includes(term));
+}
+
+function companyLooksLikeAdjacentProvider(candidate, filters = {}) {
+  const target = normalizeText([
+    filters.industry,
+    ...(filters.interpretation?.industryKeywords || [])
+  ].join(" "));
+  if (/\b(technology|tecnologia|software|saas|information technology|it services)\b/.test(target)) return false;
+  const company = candidate.company || {};
+  const haystack = normalizeText([
+    company.name,
+    company.domain,
+    company.website,
+    company.industry,
+    ...(company.keywords || [])
+  ].join(" "));
+  return /\b(software|saas|technology|tecnologia|computer software|information technology|it services|software development)\b/.test(haystack);
 }
 
 function isMappableContactPhone(phone) {
