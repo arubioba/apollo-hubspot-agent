@@ -94,37 +94,26 @@
               <datalist id="role-options"></datalist>
               <div id="selected-roles" class="chips"></div>
             </fieldset>
-            <label>Pregunta para ARA
+            <label>Dale instrucciones a ARA sobre lo que buscas o quieres excluir
               <textarea id="ad-hoc" rows="4" placeholder="Describe senales, tecnologias, exclusiones, dolores comerciales o criterios ad-hoc."></textarea>
             </label>
             <button id="interpret" type="submit">Interpretar ICP con ARA</button>
           </form>
         </article>
 
-        <article class="panel execution-panel">
+        <article id="interpretation-panel" class="panel discovery-panel" hidden>
           <div class="panel-heading">
             <div>
-              <span class="eyebrow">Agent Timeline</span>
-              <h2>Ejecucion</h2>
+              <span class="eyebrow">Discovery Plan</span>
+              <h2>Interpretacion propuesta</h2>
             </div>
-            <span id="phase-pill" class="pill">Idle</span>
+            <div class="top-actions">
+              <button id="approve-search" type="button">Aprobar y buscar</button>
+              <button id="edit-filters" class="secondary" type="button">Editar</button>
+            </div>
           </div>
-          <ol id="timeline" class="timeline"></ol>
+          <div id="interpretation" class="insight-grid"></div>
         </article>
-      </section>
-
-      <section id="interpretation-panel" class="panel" hidden>
-        <div class="panel-heading">
-          <div>
-            <span class="eyebrow">Discovery Plan</span>
-            <h2>Interpretacion propuesta</h2>
-          </div>
-          <div class="top-actions">
-            <button id="approve-search" type="button">Aprobar y buscar</button>
-            <button id="edit-filters" class="secondary" type="button">Editar</button>
-          </div>
-        </div>
-        <div id="interpretation" class="insight-grid"></div>
       </section>
 
       <section class="panel">
@@ -170,6 +159,17 @@
           <h2>Resultados</h2>
           <div id="report" class="report empty">Aun no hay ejecuciones.</div>
         </article>
+      </section>
+
+      <section class="panel execution-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Agent Timeline</span>
+            <h2>Ejecucion</h2>
+          </div>
+          <span id="phase-pill" class="pill">Idle</span>
+        </div>
+        <ol id="timeline" class="timeline horizontal-timeline"></ol>
       </section>
     </section>
   </main>
