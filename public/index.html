@@ -3,37 +3,175 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Freelan Apollo → HubSpot Agent</title>
+  <title>ARA Operator Console</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main>
-    <header><strong>Freelan Revenue Agent</strong><span>Apollo → HubSpot</span></header>
-    <section id="chat"></section>
-    <form id="filters" hidden>
-      <label>Industria principal
-        <input id="industry" placeholder="Ej. Farmacéutica" required>
-        <small>Buscaremos taxonomías y términos similares para tu aprobación.</small>
-      </label>
-      <div class="row">
-        <label>Empleados mínimo <input id="min" type="number" value="50" required></label>
-        <label>Empleados máximo <input id="max" type="number" value="5000" required></label>
+  <main class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="eyebrow">Freelan</span>
+        <strong>ARA</strong>
+        <small>Autonomous Revenue Architects</small>
       </div>
-      <label>Países <input id="countries" value="Mexico, Colombia" required></label>
-      <label>Contactos a importar después de la prueba <input id="quantity" type="number" value="50" min="1" required></label>
-      <fieldset>
-        <legend>Roles objetivo, máximo 3</legend>
-        <input id="role-search" list="role-options" placeholder="Escribe o selecciona un rol">
-        <datalist id="role-options"></datalist>
-        <div id="selected-roles"></div>
-      </fieldset>
-      <label>Describe qué contactos y empresas buscas
-        <textarea id="ad-hoc" rows="4" placeholder="Incluye características, exclusiones, tecnologías, seniority o señales relevantes."></textarea>
-      </label>
-      <button>Interpretar filtros con IA</button>
-    </form>
-    <section id="proposal" hidden></section>
-    <div id="actions"></div>
+      <nav class="agent-list" aria-label="ARA agents">
+        <button class="agent active" data-agent="orchestrator">
+          <span>Revenue Orchestrator</span>
+          <small>Run control</small>
+        </button>
+        <button class="agent" data-agent="discovery">
+          <span>Discovery Agent</span>
+          <small>Apollo search</small>
+        </button>
+        <button class="agent" data-agent="data">
+          <span>Data Intelligence</span>
+          <small>Scoring + evidence</small>
+        </button>
+        <button class="agent" data-agent="account">
+          <span>Account Intelligence</span>
+          <small>Company context</small>
+        </button>
+        <button class="agent" data-agent="hubspot">
+          <span>HubSpot Sync</span>
+          <small>Preview / writeback</small>
+        </button>
+        <button class="agent" data-agent="engagement">
+          <span>Engagement Prep</span>
+          <small>Prospecting context</small>
+        </button>
+      </nav>
+      <section class="status-card">
+        <span class="status-dot"></span>
+        <div>
+          <strong id="system-state">Ready</strong>
+          <small id="system-detail">Production is currently write-safe.</small>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">Apollo -> HubSpot</span>
+          <h1>ARA Operator Console</h1>
+          <p>Configure el ICP, lance discovery, revise candidatos y controle la sincronizacion comercial.</p>
+        </div>
+        <div class="top-actions">
+          <button id="token-button" class="secondary" type="button">Token</button>
+          <button id="new-run" type="button">Nueva campana</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="panel campaign-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">Campaign Setup</span>
+              <h2>ICP brief</h2>
+            </div>
+            <span id="run-id" class="pill">No run</span>
+          </div>
+          <form id="campaign-form">
+            <label>Industria principal
+              <input id="industry" placeholder="Ej. Farmaceutica" required>
+            </label>
+            <div class="form-row">
+              <label>Empleados min.
+                <input id="min" type="number" value="50" min="1" required>
+              </label>
+              <label>Empleados max.
+                <input id="max" type="number" value="5000" min="1" required>
+              </label>
+            </div>
+            <label>Paises objetivo
+              <input id="countries" value="Mexico, Colombia" required>
+            </label>
+            <label>Contactos objetivo
+              <input id="quantity" type="number" value="50" min="1" max="55" required>
+            </label>
+            <fieldset>
+              <legend>Roles ICP, maximo 3</legend>
+              <input id="role-search" list="role-options" placeholder="Escribe o selecciona un rol">
+              <datalist id="role-options"></datalist>
+              <div id="selected-roles" class="chips"></div>
+            </fieldset>
+            <label>Pregunta para ARA
+              <textarea id="ad-hoc" rows="4" placeholder="Describe senales, tecnologias, exclusiones, dolores comerciales o criterios ad-hoc."></textarea>
+            </label>
+            <button id="interpret" type="submit">Interpretar ICP con ARA</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">Agent Timeline</span>
+              <h2>Ejecucion</h2>
+            </div>
+            <span id="phase-pill" class="pill">Idle</span>
+          </div>
+          <ol id="timeline" class="timeline"></ol>
+        </article>
+      </section>
+
+      <section id="interpretation-panel" class="panel" hidden>
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Discovery Plan</span>
+            <h2>Interpretacion propuesta</h2>
+          </div>
+          <div class="top-actions">
+            <button id="approve-search" type="button">Aprobar y buscar</button>
+            <button id="edit-filters" class="secondary" type="button">Editar</button>
+          </div>
+        </div>
+        <div id="interpretation" class="insight-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Candidate Inbox</span>
+            <h2>Candidatos ARA</h2>
+          </div>
+          <div class="top-actions">
+            <button id="run-preview" class="secondary" type="button" disabled>Preview de 5</button>
+            <button id="run-import" type="button" disabled>Preparar importacion</button>
+          </div>
+        </div>
+        <div id="candidate-summary" class="summary-row"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Contacto</th>
+                <th>Empresa</th>
+                <th>Score</th>
+                <th>Estado</th>
+                <th>Evidencia</th>
+                <th>Accion</th>
+              </tr>
+            </thead>
+            <tbody id="candidate-table">
+              <tr><td colspan="6" class="empty">Sin candidatos todavia. Configura un ICP y ejecuta Discovery.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <span class="eyebrow">Operator Feed</span>
+          <h2>Conversacion operativa</h2>
+          <div id="operator-feed" class="feed"></div>
+        </article>
+        <article class="panel">
+          <span class="eyebrow">Run Report</span>
+          <h2>Resultados</h2>
+          <div id="report" class="report empty">Aun no hay ejecuciones.</div>
+        </article>
+      </section>
+    </section>
   </main>
   <script type="module" src="/app.js"></script>
 </body>
