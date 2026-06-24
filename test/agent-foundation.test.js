@@ -56,7 +56,7 @@ test("maps current Apollo-normalized candidates into ARA candidates", () => {
     linkedin: "https://linkedin.example/ana",
     country: "Mexico",
     validPhones: [{ type: "mobile", sanitized_number: "+525511112222" }],
-    company: { name: "Example", domain: "example.com", country: "Mexico", employees: 1200, keywords: ["crm"] }
+    company: { name: "Example", domain: "example.com", country: "Mexico", employees: 1200, keywords: ["technology", "crm"] }
   }, {
     ...context,
     filters: { industry: "Technology", roles: ["CIO"], employeeMin: 50, employeeMax: 5000, interpretation: { companyKeywords: ["HubSpot"] } }

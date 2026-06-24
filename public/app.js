@@ -1,5 +1,6 @@
 let run;
 let selectedRoles = [];
+let selectedCandidateEmails = new Set();
 let sessionToken = sessionStorage.getItem("araSessionToken") || "";
 let operatorEmail = sessionStorage.getItem("araOperatorEmail") || "";
 
@@ -46,6 +47,7 @@ async function startRun() {
   clearFeed();
   $("#candidate-table").innerHTML = emptyRow("Sin candidatos todavia. Configura un ICP y ejecuta Discovery.");
   $("#candidate-summary").innerHTML = "";
+  selectedCandidateEmails = new Set();
   $("#report").textContent = "Aun no hay ejecuciones.";
   $("#interpretation-panel").hidden = true;
   actions.preview.disabled = true;
@@ -83,6 +85,7 @@ function bindEvents() {
   actions.approveSearch.onclick = () => search().catch(showError);
   actions.preview.onclick = () => preview().catch(showError);
   actions.import.onclick = () => finalImport().catch(showError);
+  document.querySelector('[data-agent="engagement"]').onclick = () => engagementPrep().catch(showError);
   $("#role-search").onchange = event => {
     const role = event.target.value.trim();
     if (role && selectedRoles.length < 3 && !selectedRoles.includes(role)) selectedRoles.push(role);
@@ -135,19 +138,22 @@ async function search() {
 
 async function preview() {
   await ensureRun();
+  assertCandidateSelection();
   setSystem("Preview", "HubSpot Sync esta preparando prueba controlada.");
   renderTimeline("hubspot", ["orchestrator", "discovery", "data", "account"]);
-  const data = await call(`/api/runs/${run.id}/test`);
+  const data = await call(`/api/runs/${run.id}/test`, { selectedEmails: selectedCandidateList() });
   run = data.run;
   $("#phase-pill").textContent = readablePhase(run.phase);
   renderReport("Preview de 5", data.message, run.testResults);
   addFeed("HubSpot Sync", data.message);
+  await loadCandidates(false);
 }
 
 async function finalImport(code) {
   await ensureRun();
+  assertCandidateSelection();
   setSystem("Sync", "HubSpot Sync esta preparando la importacion.");
-  const data = await call(`/api/runs/${run.id}/import`, { approvalCode: code });
+  const data = await call(`/api/runs/${run.id}/import`, { approvalCode: code, selectedEmails: selectedCandidateList() });
   if (data.requiresApprovalCode) {
     const approvalCode = prompt(data.message);
     if (!approvalCode) return;
@@ -159,12 +165,22 @@ async function finalImport(code) {
   addFeed("HubSpot Sync", data.message);
   renderTimeline("engagement", ["orchestrator", "discovery", "data", "account", "hubspot"]);
   setSystem("Complete", "Run terminado. Revisa reporte y HubSpot.");
+  await loadCandidates(false);
 }
 
-async function loadCandidates() {
+async function engagementPrep() {
+  const selected = selectedCandidateList();
+  if (!selected.length) throw new Error("Selecciona al menos un candidato para preparar Engagement Prep.");
+  addFeed("Engagement Prep", `Siguiente fase: preparar contexto y secuencia para ${selected.length} contacto(s) seleccionados. Aun no ejecuta acciones automaticas.`);
+  setSystem("Engagement queued", "Engagement Prep sera por contacto seleccionado en la siguiente iteracion.");
+}
+
+async function loadCandidates(resetSelection = true) {
   await ensureRun();
   let data = await call(`/api/candidates?run_id=${encodeURIComponent(run.id)}&page_size=25`, {}, "GET");
   if (!data.candidates?.length) data = await call(`/api/import-runs/${run.id}/candidates?page_size=25`, {}, "GET");
+  if (resetSelection) setDefaultCandidateSelection(data.candidates || []);
+  else pruneSyncedCandidates(data.candidates || []);
   renderCandidateSummary(data);
   renderCandidates(data.candidates || []);
 }
@@ -224,8 +240,10 @@ function renderCandidateSummary(data) {
     metric("Candidatos", data.pagination?.total ?? items.length),
     metric("Recomendados", recommended),
     metric("Pendientes", pending),
+    metric("Seleccionados", selectedCandidateEmails.size),
     metric("Run", shortId(run.id))
   ].join("");
+  updateCandidateActionButtons();
 }
 
 function renderCandidates(items) {
@@ -234,16 +252,30 @@ function renderCandidates(items) {
     return;
   }
   $("#candidate-table").innerHTML = items.map(candidate => {
-    const evidence = (candidate.evidence || []).slice(0, 2).map(item => item.message || item.code).filter(Boolean).join("; ");
+    const evidence = (candidate.evidence || []).slice(0, 3).map(item => item.message || item.code).filter(Boolean).join("; ");
+    const email = candidate.email || "";
+    const selectable = candidate.hubspot_sync_status !== "synced";
+    const checked = selectedCandidateEmails.has(email.toLowerCase()) && selectable ? "checked" : "";
+    const disabled = selectable ? "" : "disabled";
     return `<tr>
+      <td><input class="candidate-select" type="checkbox" data-email="${escapeHtml(email)}" ${checked} ${disabled}></td>
       <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "")}</span></td>
       <td>${escapeHtml(candidate.company || "")}<span class="candidate-meta">${escapeHtml(candidate.title || "")}</span></td>
       <td><span class="score">${escapeHtml(candidate.opportunity_score ?? candidate.icp_score ?? "-")}</span></td>
       <td>${escapeHtml(candidate.lifecycle_status || candidate.status || "candidate")}<span class="candidate-meta">${escapeHtml(candidate.approval_status || "")}</span></td>
       <td>${escapeHtml(evidence || candidate.recommendation || "Sin evidencia visible")}</td>
-      <td>${escapeHtml(candidate.next_action || "commercial_approval")}</td>
+      <td>${selectable ? "Seleccionar para HubSpot" : "Sincronizado"}</td>
     </tr>`;
   }).join("");
+  document.querySelectorAll(".candidate-select").forEach(input => {
+    input.onchange = event => {
+      const email = event.target.dataset.email.toLowerCase();
+      if (event.target.checked) selectedCandidateEmails.add(email);
+      else selectedCandidateEmails.delete(email);
+      renderCandidateSummary({ candidates: items, pagination: { total: items.length } });
+    };
+  });
+  updateCandidateActionButtons();
 }
 
 function renderTimeline(active, done = []) {
@@ -265,6 +297,35 @@ function renderReport(title, message, results = {}) {
 Exitosos: ${successful.length}
 Fallidos: ${failed.length}
 ${failed.map(item => `${item.email}: ${item.error}`).join("\n")}</pre>`;
+}
+
+function setDefaultCandidateSelection(candidates) {
+  selectedCandidateEmails = new Set(candidates
+    .filter(candidate => candidate.lifecycle_status === "RECOMMENDED" && candidate.hubspot_sync_status !== "synced")
+    .map(candidate => candidate.email?.toLowerCase())
+    .filter(Boolean));
+}
+
+function pruneSyncedCandidates(candidates) {
+  candidates
+    .filter(candidate => candidate.hubspot_sync_status === "synced")
+    .map(candidate => candidate.email?.toLowerCase())
+    .filter(Boolean)
+    .forEach(email => selectedCandidateEmails.delete(email));
+}
+
+function selectedCandidateList() {
+  return [...selectedCandidateEmails];
+}
+
+function assertCandidateSelection() {
+  if (!selectedCandidateEmails.size) throw new Error("Selecciona candidatos antes de sincronizar con HubSpot.");
+}
+
+function updateCandidateActionButtons() {
+  const disabled = selectedCandidateEmails.size === 0;
+  actions.preview.disabled = disabled;
+  actions.import.disabled = disabled;
 }
 
 function addFeed(agent, text, type = "info") {
@@ -388,7 +449,7 @@ function metric(label, value) {
 }
 
 function emptyRow(message) {
-  return `<tr><td colspan="6" class="empty">${escapeHtml(message)}</td></tr>`;
+  return `<tr><td colspan="7" class="empty">${escapeHtml(message)}</td></tr>`;
 }
 
 function setSystem(state, detail) {

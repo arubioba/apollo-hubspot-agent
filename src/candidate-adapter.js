@@ -4,6 +4,7 @@ export function toAraCandidate(candidate, { tenantId, campaignId, runId, correla
   const name = [candidate.firstName, candidate.lastName].filter(Boolean).join(" ").trim() || candidate.email;
   const evidence = buildEvidence(candidate, filters);
   const scores = scoreCandidate(candidate, filters);
+  const recommended = scores.opportunityScore >= 75 && scores.industryMatch && scores.titleMatch;
   return {
     candidateId: crypto.randomUUID(),
     tenantId,
@@ -29,12 +30,12 @@ export function toAraCandidate(candidate, { tenantId, campaignId, runId, correla
     contactRelevanceScore: scores.contactRelevanceScore,
     opportunityScore: scores.opportunityScore,
     confidence: scores.confidence,
-    recommendation: scores.opportunityScore >= 75 ? "recommended" : "needs_review",
+    recommendation: recommended ? "recommended" : "needs_review",
     positiveFactors: evidence.filter(item => item.polarity === "positive"),
     negativeFactors: evidence.filter(item => item.polarity === "negative"),
     commercialSignals: buildCommercialSignals(candidate, filters),
     evidence,
-    lifecycleStatus: scores.opportunityScore >= 75 ? "RECOMMENDED" : "HUMAN_REVIEW_REQUIRED",
+    lifecycleStatus: recommended ? "RECOMMENDED" : "HUMAN_REVIEW_REQUIRED",
     approvalStatus: "PENDING",
     hubspotSyncStatus: "pending",
     enrichmentStatus: "not_started",
@@ -52,29 +53,38 @@ export function toAraCandidate(candidate, { tenantId, campaignId, runId, correla
 function scoreCandidate(candidate, filters) {
   let company = 40;
   let contact = 35;
+  const industryMatch = matchesRequestedIndustry(candidate, filters);
+  const titleMatch = titleMatches(candidate.title, filters.roles);
   if (candidate.company?.domain) company += 25;
   if (candidate.company?.employees) company += 10;
+  if (industryMatch) company += 15;
+  else company -= 20;
   if (candidate.emailVerified) contact += 25;
   if (candidate.validPhones?.length) contact += 20;
-  if (titleMatches(candidate.title, filters.roles)) contact += 15;
-  const companyIcpScore = Math.min(100, company);
+  if (titleMatch) contact += 15;
+  const companyIcpScore = Math.max(0, Math.min(100, company));
   const contactRelevanceScore = Math.min(100, contact);
   const opportunityScore = Math.round((companyIcpScore * 0.45) + (contactRelevanceScore * 0.55));
   return {
     companyIcpScore,
     contactRelevanceScore,
     opportunityScore,
-    confidence: Math.min(0.95, Math.max(0.45, opportunityScore / 100))
+    confidence: Math.min(0.95, Math.max(0.45, opportunityScore / 100)),
+    industryMatch,
+    titleMatch
   };
 }
 
 function buildEvidence(candidate, filters) {
+  const industryMatch = matchesRequestedIndustry(candidate, filters);
   return [
     candidate.emailVerified && evidence("verified_email", "Email laboral verificado.", "positive"),
     candidate.company?.domain && evidence("company_domain_available", "Dominio de empresa disponible.", "positive"),
     candidate.validPhones?.length && evidence("valid_phone_available", "Contacto tiene telefono valido.", "positive"),
     candidate.title && evidence("title_available", `Cargo detectado: ${candidate.title}.`, "positive"),
-    filters.industry && evidence("industry_requested", `Industria solicitada: ${filters.industry}.`, "positive")
+    industryMatch
+      ? evidence("industry_match", `Industria/señal ICP detectada para: ${filters.industry}.`, "positive")
+      : evidence("industry_not_verified", `Industria solicitada no verificada en señales de Apollo: ${filters.industry}. Revisar antes de sincronizar.`, "negative")
   ].filter(Boolean);
 }
 
@@ -92,6 +102,30 @@ function evidence(code, message, polarity) {
 function titleMatches(title = "", roles = []) {
   const normalized = title.toLowerCase();
   return roles.some(role => normalized.includes(String(role).toLowerCase()));
+}
+
+function matchesRequestedIndustry(candidate, filters) {
+  const terms = [
+    filters.industry,
+    ...(filters.interpretation?.industryKeywords || []),
+    ...(filters.interpretation?.companyKeywords || [])
+  ].map(normalizeText).filter(Boolean);
+  const haystack = normalizeText([
+    candidate.company?.name,
+    candidate.company?.domain,
+    ...(candidate.company?.keywords || [])
+  ].filter(Boolean).join(" "));
+  if (!terms.length) return true;
+  return terms.some(term => haystack.includes(term) || term.includes(haystack));
+}
+
+function normalizeText(value = "") {
+  return String(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function inferSeniority(title = "") {

@@ -311,6 +311,37 @@ test("preview endpoint can return simulated result without write methods", async
   assert.equal(response.body.message, "Preview terminado. No se escribio en HubSpot.");
 });
 
+test("HubSpot sync endpoints receive only selected candidate emails", async () => {
+  const selected = ["ana@example.com", "luis@example.com"];
+  const observed = {};
+  const { app } = makeApp({
+    handlers: {
+      executeTest: async (_id, selectedEmails) => {
+        observed.preview = selectedEmails;
+        return { run: { id: "run-1" }, message: "preview" };
+      },
+      executeFinal: async (_id, approvalCode, selectedEmails) => {
+        observed.import = { approvalCode, selectedEmails };
+        return { run: { id: "run-1" }, message: "import" };
+      }
+    }
+  });
+  await request(app, {
+    method: "POST",
+    url: "/api/runs/run-1/test",
+    headers: { "X-ARA-Admin-Token": "valid-token" },
+    body: { selectedEmails: selected }
+  });
+  await request(app, {
+    method: "POST",
+    url: "/api/runs/run-1/import",
+    headers: { "X-ARA-Admin-Token": "valid-token" },
+    body: { approvalCode: "code-1", selectedEmails: selected }
+  });
+  assert.deepEqual(observed.preview, selected);
+  assert.deepEqual(observed.import, { approvalCode: "code-1", selectedEmails: selected });
+});
+
 test("validation error returns controlled 400", async () => {
   const { app } = makeApp({ handlers: { analyzeFilters: async () => { throw new ValidationError("Bad filters."); } } });
   const response = await request(app, {

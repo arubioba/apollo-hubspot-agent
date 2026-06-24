@@ -113,13 +113,14 @@ export async function applyRelaxation(id) {
   return approveRoles(id);
 }
 
-export async function executeTest(id) {
+export async function executeTest(id, selectedEmails = []) {
   const run = await requiredRun(id);
   logger.info("legacy.execute_test.used", "Legacy compatibility preview path used.", {
     runId: run.id,
     retirementCriteria: "Retire after ARA Candidate approval, preview, and controlled HubSpot sync reach parity."
   });
-  const batch = run.candidates.slice(0, config.testBatchSize);
+  const batch = selectedCandidates(run, selectedEmails).slice(0, config.testBatchSize);
+  if (!batch.length) throw new ValidationError("Selecciona al menos un candidato antes de ejecutar el preview.");
   if (config.writeMode === "enabled") await ensureHubSpotProperties();
   run.testResults = await executeBatch(batch, false, filtersWithRunContext(run));
   run.phase = "test_review";
@@ -127,9 +128,16 @@ export async function executeTest(id) {
   return { run, message: config.writeMode === "preview" ? "Preview terminado. No se escribio en HubSpot." : "Prueba terminada. Verifica los contactos en HubSpot antes de continuar." };
 }
 
-export async function executeFinal(id, approvalCode) {
+export async function executeFinal(id, approvalCode, selectedEmails = []) {
   const run = await requiredRun(id);
-  const requested = run.filters.quantity;
+  const alreadySynced = new Set([
+    ...(run.testResults?.successful || []),
+    ...(run.finalResults?.successful || [])
+  ].map(item => item.email?.toLowerCase()).filter(Boolean));
+  const batch = selectedCandidates(run, selectedEmails)
+    .filter(candidate => !alreadySynced.has(candidate.email.toLowerCase()));
+  if (!batch.length) throw new ValidationError("Selecciona candidatos pendientes antes de preparar la importacion.");
+  const requested = batch.length;
   const dailyCount = await getDailyCount();
   const remaining = Math.max(0, config.dailyLimit - dailyCount);
   const requiresCode = requested > remaining;
@@ -139,7 +147,6 @@ export async function executeFinal(id, approvalCode) {
       message: `La operacion supera el limite diario disponible de ${remaining}. Ingresa el codigo de aprobacion.`
     };
   }
-  const batch = run.candidates.slice(config.testBatchSize, config.testBatchSize + requested);
   if (config.writeMode === "enabled") await ensureHubSpotProperties();
   run.finalResults = await executeBatch(batch, true, filtersWithRunContext(run));
   run.phase = "complete";
@@ -209,6 +216,12 @@ function filtersWithRunContext(run) {
 
 function uniqueByEmail(items) {
   return [...new Map(items.filter(x => x.email).map(x => [x.email.toLowerCase(), x])).values()];
+}
+
+function selectedCandidates(run, selectedEmails = []) {
+  const selected = new Set((selectedEmails || []).map(email => String(email).toLowerCase()).filter(Boolean));
+  if (!selected.size) return [];
+  return run.candidates.filter(candidate => selected.has(candidate.email?.toLowerCase()));
 }
 
 function validateFilters(filters) {
