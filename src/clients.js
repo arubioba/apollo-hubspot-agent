@@ -352,7 +352,6 @@ export async function importCandidate(candidate, filters) {
   const contactIncoming = {
     ...contactProperties(candidate),
     ...araIncoming,
-    ara_engagement_prep_notes: buildEngagementPrepNote(candidate, filters),
     freelan_icp_match_context: araIncoming.ara_icp_match_context
   };
   const companyIncoming = {
@@ -384,7 +383,7 @@ export async function writeEngagementPrep(candidate, filters) {
   const intelligence = isPreviewMode()
     ? mockAccountIntelligence(candidate, filters)
     : await buildAccountIntelligence(candidate, filters);
-  const note = buildEngagementPrepNote(candidate, filters, intelligence);
+  const note = buildDynamicEngagementPrepNote(candidate, filters, intelligence);
   const properties = { ara_engagement_prep_notes: note };
   if (isPreviewMode()) {
     logger.info("hubspot.engagement_preview.completed", "HubSpot engagement prep preview completed.", { email: candidate.email });
@@ -419,7 +418,7 @@ function mockAccountIntelligence(candidate, filters) {
 
 async function buildAccountIntelligence(candidate, filters) {
   const [website, stakeholders] = await Promise.all([
-    analyzeCompanyWebsite(candidate).catch(error => {
+    analyzeCompanyWebsite(candidate, filters).catch(error => {
       logger.warn("account_intelligence.website_failed", "Website analysis failed.", { domain: candidate.company?.domain, error });
       return null;
     }),
@@ -431,7 +430,7 @@ async function buildAccountIntelligence(candidate, filters) {
   return { website, stakeholders };
 }
 
-async function analyzeCompanyWebsite(candidate) {
+async function analyzeCompanyWebsite(candidate, filters) {
   if (config.externalServicesMode === "mock") {
     return {
       url: candidate.company?.website || `https://${candidate.company?.domain}`,
@@ -439,17 +438,16 @@ async function analyzeCompanyWebsite(candidate) {
       signals: ["modelo comercial B2B/B2C", "oportunidad de revenue operations", "potencial de automatización comercial"]
     };
   }
-  const url = normalizeWebsiteUrl(candidate.company?.website || candidate.company?.domain);
-  if (!url) return null;
-  const response = await fetch(url, {
-    signal: AbortSignal.timeout(7000),
-    headers: { "User-Agent": "ARA-Freelan/0.1 (+https://freelan.com.mx)" }
-  });
-  if (!response.ok) throw new Error(`Website ${response.status}`);
-  const html = await response.text();
+  const fetched = await fetchCompanyWebsite(candidate);
+  if (!fetched) return null;
+  const html = await fetched.response.text();
   const text = htmlToText(html).slice(0, 5000);
-  if (!text) return { url, summary: "No fue posible extraer contenido legible del sitio.", signals: [] };
-  return summarizeWebsiteText(url, text, candidate);
+  if (!text) return { url: fetched.url, summary: "No fue posible extraer contenido legible del sitio.", signals: [] };
+  const aiSummary = await summarizeWebsiteWithOpenAI(fetched.url, text, candidate, filters).catch(error => {
+    logger.warn("account_intelligence.website_ai_failed", "Website AI analysis failed; using heuristic summary.", { domain: candidate.company?.domain, error });
+    return null;
+  });
+  return aiSummary || summarizeWebsiteText(fetched.url, text, candidate, filters);
 }
 
 async function findAdditionalStakeholders(candidate, filters) {
@@ -546,11 +544,111 @@ function buildEngagementPrepNote(candidate, filters, intelligence = {}) {
   ].join("\n");
 }
 
+function buildDynamicEngagementPrepNote(candidate, filters, intelligence = {}) {
+  const company = candidate.company || {};
+  const araProfile = getAraKnowledgeProfile();
+  const contactName = [candidate.firstName, candidate.lastName].filter(Boolean).join(" ") || candidate.contactName || candidate.email;
+  const signals = filters.interpretation?.companyKeywords?.length
+    ? filters.interpretation.companyKeywords.join(", ")
+    : "No se declararon senales adicionales.";
+  const evidence = candidate.evidence?.length
+    ? candidate.evidence.map(item => item.message || item.code).filter(Boolean).join("; ")
+    : "Email laboral, telefono y dominio disponibles segun Discovery.";
+  const websiteSignals = intelligence.website?.signals?.length
+    ? intelligence.website.signals.join("; ")
+    : "sin senales especificas";
+  const opportunities = intelligence.website?.opportunities?.length
+    ? intelligence.website.opportunities.map((item, index) => `${index + 1}. ${item}`)
+    : [
+      `1. Validar como ${company.name || "la empresa"} gestiona pipeline, datos y handoffs comerciales.`,
+      "2. Identificar fricciones manuales que ARA/Freelan pueda automatizar sobre HubSpot."
+    ];
+  const approach = intelligence.website?.approach?.length
+    ? intelligence.website.approach.map((item, index) => `${index + 1}. ${item}`)
+    : [
+      "1. Abrir con una hipotesis concreta ligada al ICP y al rol del contacto.",
+      "2. Preguntar por visibilidad de pipeline, adopcion de CRM y fricciones entre marketing y ventas.",
+      "3. Conectar la conversacion con sistemas de revenue autonomos sobre HubSpot.",
+      "4. Proponer una auditoria corta de procesos comerciales, datos y automatizaciones existentes."
+    ];
+  return [
+    "Contexto de la empresa",
+    `${company.name || candidate.companyName || "Empresa sin nombre"} (${company.domain || candidate.domain || "dominio no disponible"}) opera en el ICP solicitado: ${filters.industry}. Empleados objetivo: ${filters.employeeMin}-${filters.employeeMax}. Pais(es): ${(filters.countries || []).join(", ")}. Senales capturadas: ${signals}. Evidencia ARA: ${evidence}`,
+    "",
+    "Analisis del sitio web",
+    intelligence.website
+      ? `${intelligence.website.summary} Senales detectadas: ${websiteSignals}. Fuente: ${intelligence.website.url}.`
+      : "Pendiente: no se pudo analizar el sitio web durante esta preparacion.",
+    "",
+    "Oportunidades potenciales - con base en el research y la propuesta de valor de Freelan.",
+    `Lente ARA/Freelan: ${araProfile.corePremise}`,
+    `Senales de oportunidad ARA a validar: ${araProfile.opportunitySignals.slice(0, 5).join("; ")}.`,
+    ...opportunities,
+    `Servicios Freelan potencialmente relevantes: ${araProfile.servicePortfolio.slice(0, 4).join("; ")}.`,
+    "",
+    "Key Stake Holders",
+    `Contacto principal: ${contactName} - ${candidate.title || candidate.jobTitle || "cargo no disponible"} (${candidate.email}).`,
+    `Stakeholders sugeridos: ${filters.roles.join(", ")}; Revenue Operations; CRM Owner; Direccion Comercial; Marketing Operations.`,
+    ...(intelligence.stakeholders?.length ? intelligence.stakeholders.map(stakeholder =>
+      `Stakeholder adicional: ${stakeholder.name} - ${stakeholder.title || "cargo no disponible"} (${stakeholder.email || "email no disponible"}). ${stakeholder.reason}`
+    ) : ["Stakeholders adicionales: no se encontraron contactos adicionales alineados a buyer personas en Apollo."]),
+    "",
+    "Recomendaciones de approach",
+    ...approach
+  ].join("\n");
+}
+
 function normalizeWebsiteUrl(value = "") {
   const raw = String(value || "").trim();
   if (!raw) return "";
   if (/^https?:\/\//i.test(raw)) return raw;
   return `https://${raw}`;
+}
+
+function websiteCandidates(candidate) {
+  const raw = String(candidate.company?.website || candidate.company?.domain || "").trim();
+  if (!raw) return [];
+  const normalized = normalizeWebsiteUrl(raw);
+  let host = "";
+  try {
+    host = new URL(normalized).host.replace(/^www\./i, "");
+  } catch {
+    host = raw.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0];
+  }
+  return unique([
+    normalized,
+    `https://${host}`,
+    `https://www.${host}`,
+    `http://${host}`,
+    `http://www.${host}`
+  ]);
+}
+
+async function fetchCompanyWebsite(candidate) {
+  for (const url of websiteCandidates(candidate)) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; ARA-Freelan/0.1; +https://freelan.com.mx)",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "es-MX,es;q=0.9,en;q=0.7"
+        }
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && /text\/html|application\/xhtml\+xml|text\/plain/i.test(contentType)) {
+        return { url: response.url || url, response };
+      }
+      logger.debug("account_intelligence.website_skipped", "Website candidate did not return readable HTML.", {
+        url,
+        status: response.status,
+        contentType
+      });
+    } catch (error) {
+      logger.debug("account_intelligence.website_attempt_failed", "Website candidate fetch failed.", { url, error });
+    }
+  }
+  return null;
 }
 
 function htmlToText(html = "") {
@@ -567,7 +665,63 @@ function htmlToText(html = "") {
     .trim();
 }
 
-function summarizeWebsiteText(url, text, candidate) {
+async function summarizeWebsiteWithOpenAI(url, text, candidate, filters) {
+  if (!config.openaiKey) return null;
+  const araProfile = getAraKnowledgeProfile();
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.openaiKey}`
+    },
+    body: JSON.stringify({
+      model: config.openaiModel,
+      instructions: [
+        "Eres ARA Account Intelligence Agent para Freelan.",
+        "Analiza el sitio web de la empresa y genera conclusiones comerciales especificas en espanol.",
+        "No uses texto generico. Menciona hechos observables del sitio cuando existan.",
+        "Conecta oportunidades con la propuesta Freelan/ARA: sistemas de revenue, HubSpot, automatizacion, datos, pipeline y adopcion comercial.",
+        "Devuelve JSON valido con summary, signals, opportunities, approach."
+      ].join(" "),
+      input: JSON.stringify({
+        company: candidate.company?.name,
+        domain: candidate.company?.domain,
+        websiteUrl: url,
+        requestedIndustry: filters.industry,
+        requestedRoles: filters.roles,
+        userBrief: filters.adHocBrief,
+        freelanPremise: araProfile.corePremise,
+        freelanServices: araProfile.servicePortfolio.slice(0, 6),
+        websiteText: text.slice(0, 4500)
+      }),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "ara_website_account_intelligence",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              summary: { type: "string" },
+              signals: { type: "array", items: { type: "string" }, maxItems: 6 },
+              opportunities: { type: "array", items: { type: "string" }, maxItems: 5 },
+              approach: { type: "array", items: { type: "string" }, maxItems: 4 }
+            },
+            required: ["summary", "signals", "opportunities", "approach"]
+          }
+        }
+      }
+    })
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`OpenAI ${response.status}: ${body.error?.message || "website analysis failed"}`);
+  const output = body.output?.flatMap(item => item.content || []).find(item => item.type === "output_text")?.text;
+  if (!output) return null;
+  return { url, ...JSON.parse(output) };
+}
+
+function summarizeWebsiteText(url, text, candidate, filters = {}) {
   const sentences = text.split(/(?<=[.!?])\s+/).map(value => value.trim()).filter(Boolean);
   const summary = sentences.slice(0, 2).join(" ").slice(0, 600)
     || `${candidate.company?.name || "La empresa"} tiene presencia web activa.`;
@@ -585,7 +739,21 @@ function summarizeWebsiteText(url, text, candidate) {
     ["salud", "salud"],
     ["software", "software"]
   ].filter(([needle]) => normalized.includes(needle)).map(([, label]) => label);
-  return { url, summary, signals: unique(signals).slice(0, 6) };
+  const industrySignal = filters.industry ? [`ICP solicitado: ${filters.industry}`] : [];
+  return {
+    url,
+    summary,
+    signals: unique([...industrySignal, ...signals]).slice(0, 6),
+    opportunities: [
+      "Validar fricciones entre marketing, ventas y operacion comercial.",
+      "Explorar visibilidad de pipeline, calidad de datos y automatizaciones existentes.",
+      "Identificar si HubSpot puede operar como cerebro comercial del proceso."
+    ],
+    approach: [
+      "Abrir con una hipotesis basada en el sitio web y el ICP solicitado.",
+      "Preguntar por procesos manuales, reporting comercial y adopcion de CRM."
+    ]
+  };
 }
 
 function buyerPersonaTitles(filters = {}) {
