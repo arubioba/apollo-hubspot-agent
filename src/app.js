@@ -21,7 +21,11 @@ export function createApp({
 }) {
   const app = express();
   app.use(express.json({ limit: config.maxBodyBytes }));
-  app.use(express.static(fileURLToPath(new URL("../public", import.meta.url))));
+  // The console is a single-page client. Never let a browser retain an older
+  // workflow after a deployment, because its API contract may have changed.
+  app.use(express.static(fileURLToPath(new URL("../public", import.meta.url)), {
+    setHeaders: res => res.setHeader("Cache-Control", "no-store, max-age=0")
+  }));
 
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
