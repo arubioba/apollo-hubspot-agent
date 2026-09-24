@@ -276,8 +276,6 @@ function renderCandidates(items) {
     const synced = candidate.hubspot_sync_status === "synced";
     const checked = selectedCandidateEmails.has(selectionKey) ? "checked" : "";
     const pending = !email || candidate.enrichment_status === "required";
-    const context = candidate.google_context || {};
-    const sources = (context.sources || []).filter(item => /^https?:\/\//i.test(item.url || ""));
     return `<tr>
       <td><input class="candidate-select" type="checkbox" data-key="${escapeHtml(selectionKey)}" ${checked} ${!selectionKey || synced ? "disabled" : ""} aria-label="Seleccionar ${escapeHtml(candidate.name || "prospecto")}"></td>
       <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "Email pendiente de enriquecimiento")}</span></td>
@@ -285,7 +283,6 @@ function renderCandidates(items) {
       <td><span class="score">${escapeHtml(candidate.opportunity_score ?? candidate.icp_score ?? "-")}</span></td>
       <td>${escapeHtml(candidate.lifecycle_status || candidate.status || "candidate")}<span class="candidate-meta">${escapeHtml(candidate.approval_status || "")}</span></td>
       <td>${escapeHtml(evidence || candidate.recommendation || "Sin evidencia visible")}</td>
-      <td class="google-context"><textarea readonly rows="6" aria-label="Contexto de Google para ${escapeHtml(candidate.company || "empresa")}">${escapeHtml(context.text || "Sin contexto de Google disponible.")}</textarea>${sources.map((item, index) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">[${index + 1}] ${escapeHtml(item.title || "Fuente")}</a>`).join("<br>")}<span class="candidate-meta">${context.checkedAt ? `Consultado: ${escapeHtml(context.checkedAt)}` : ""}</span></td>
       <td>${synced ? "Listo para Engagement Prep" : pending ? "Seleccionar para crear en HubSpot con identidad pendiente de enriquecimiento." : "Seleccionar para HubSpot"}</td>
     </tr>`;
   }).join("");

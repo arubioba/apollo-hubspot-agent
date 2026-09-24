@@ -248,6 +248,14 @@ test("preview mode accepts an Apollo identity without an email for operator-appr
   assert.equal(result.contactProperties.hs_linkedin_url, "https://www.linkedin.com/in/prospect");
 });
 
+test("preview mode can create a manually selected company when Apollo does not expose its domain", async () => {
+  config.writeMode = "preview";
+  const prospect = { ...candidate(), email: null, emailVerified: false, apolloId: "apollo-identity-2", company: { ...candidate().company, domain: "" } };
+  const result = await importCandidate(prospect, filters());
+  assert.equal(result.preview, true);
+  assert.equal(result.companyProperties.name, "Example");
+});
+
 test("preview mode returns Engagement Prep notes without calling HubSpot", async () => {
   config.writeMode = "preview";
   let called = false;
