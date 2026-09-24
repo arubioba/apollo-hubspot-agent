@@ -7,6 +7,7 @@ import { getCorrelationId } from "./context.js";
 import { ValidationError } from "./errors.js";
 import { logger } from "./logger.js";
 import { toAraCandidate } from "./candidate-adapter.js";
+import { createDiscoveryJobs } from "./discovery-jobs.js";
 import { markAraCandidateEngagementPrepared, markAraCandidateHubSpotSynced, upsertAraCandidates } from "./candidate-repository.js";
 
 const ICP_ROLES = [
@@ -14,6 +15,11 @@ const ICP_ROLES = [
   "Director de Marketing", "Sales Director", "Director Comercial",
   "Director de Ventas", "CEO", "Director General"
 ];
+
+const discoveryJobs = createDiscoveryJobs({ load: requiredRun, save: saveRun, execute: approveRoles,
+  log: error => logger.error("discovery.job.failed", "Discovery job failed.", { error }) });
+export const startDiscovery = id => discoveryJobs.start(id);
+export const discoveryStatus = id => discoveryJobs.status(id);
 
 export async function startRun() {
   const run = {
@@ -30,7 +36,9 @@ export async function startRun() {
 }
 
 export async function configureRun(id, filters) {
+  discoveryJobs.assertIdle(id);
   const run = await requiredRun(id);
+  delete run.filters.discoveryJob;
   validateFilters(filters);
   run.filters = filters;
   run.roles = filters.roles;
@@ -40,8 +48,10 @@ export async function configureRun(id, filters) {
 }
 
 export async function analyzeFilters(id, filters) {
+  discoveryJobs.assertIdle(id);
   validateFilters(filters);
   const run = await requiredRun(id);
+  delete run.filters.discoveryJob;
   const interpretation = await interpretFilters({
     industry: filters.industry,
     selectedRoles: filters.roles,

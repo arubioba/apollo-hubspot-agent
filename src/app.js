@@ -145,6 +145,8 @@ export function createApp({
   app.post("/api/runs/:id/configure", route(req => handlers.configureRun(req.params.id, req.body)));
   app.post("/api/runs/:id/analyze", route(req => handlers.analyzeFilters(req.params.id, req.body)));
   app.post("/api/runs/:id/approve-roles", route(req => handlers.approveRoles(req.params.id)));
+  app.post("/api/runs/:id/discovery", route(req => handlers.startDiscovery(req.params.id)));
+  app.get("/api/runs/:id/discovery", route(req => handlers.discoveryStatus(req.params.id)));
   app.post("/api/runs/:id/relax", route(req => handlers.applyRelaxation(req.params.id)));
   app.post("/api/runs/:id/test", route(req => handlers.executeTest(req.params.id, req.body?.selectedEmails)));
   app.post("/api/runs/:id/import", route(req => handlers.executeFinal(req.params.id, req.body?.approvalCode, req.body?.selectedEmails)));

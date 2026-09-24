@@ -122,7 +122,16 @@ async function search() {
   setSystem("Searching", "Discovery Agent esta consultando Apollo.");
   renderTimeline("data", ["orchestrator", "discovery"]);
   addFeed("Discovery Agent", "Buscando en la base global de Apollo. Excluyendo contactos y empresas guardados en Apollo y HubSpot; consultando contexto de Google. No se ejecutara enriquecimiento de pago.");
-  const data = await call(`/api/runs/${run.id}/approve-roles`);
+  const searchRunId = run.id;
+  let job = await call(`/api/runs/${searchRunId}/discovery`);
+  while (job.status === "running") {
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    if (run.id !== searchRunId) return;
+    job = await call(`/api/runs/${searchRunId}/discovery`, {}, "GET");
+  }
+  if (run.id !== searchRunId) return;
+  if (job.status !== "completed") throw new Error(job.message || "No se pudo completar la busqueda.");
+  const data = job.result;
   run = data.run;
   $("#phase-pill").textContent = readablePhase(run.phase);
   addFeed("Discovery Agent", data.message);

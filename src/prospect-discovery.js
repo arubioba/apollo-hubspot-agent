@@ -1,4 +1,5 @@
 import { AppError } from "./errors.js";
+import { logger } from "./logger.js";
 // Discovery never calls enrichment or creates Apollo/HubSpot records.
 export function normalizeDomain(value = "") {
   try {
@@ -17,6 +18,7 @@ async function allApollo(apollo, kind) {
     const data = await apollo(`/${kind}/search`, { page, per_page: 100 });
     if (!Array.isArray(data[kind])) throw new Error(`No se pudo verificar la lista de ${kind} en Apollo.`);
     rows.push(...data[kind]);
+    if (page === 1 || page % 25 === 0) logger.info("discovery.exclusions.progress", "Reading saved Apollo records.", { provider: "apollo", kind, page, records: rows.length });
     const total = data.pagination?.total_entries;
     if (Number(total) > 50000) throw new Error(`La exclusion de ${kind} supera el limite de Apollo; no se publicaran candidatos sin comprobar.`);
     if (total != null ? rows.length >= Number(total) : data[kind].length < 100) return rows;
@@ -34,6 +36,7 @@ async function allHubSpot(hubspot, kind, properties) {
     const data = await hubspot(`/crm/v3/objects/${kind}?${query}`);
     if (!Array.isArray(data.results)) throw new Error(`No se pudo verificar ${kind} en HubSpot.`);
     rows.push(...data.results);
+    if (page === 0 || (page + 1) % 25 === 0) logger.info("discovery.exclusions.progress", "Reading saved HubSpot records.", { provider: "hubspot", kind, page: page + 1, records: rows.length });
     after = data.paging?.next?.after;
     if (after == null) return rows;
     if (cursors.has(String(after))) throw new Error("Paginacion repetida en HubSpot; exclusion incompleta.");
