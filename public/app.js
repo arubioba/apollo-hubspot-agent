@@ -272,27 +272,28 @@ function renderCandidates(items) {
   $("#candidate-table").innerHTML = items.map(candidate => {
     const evidence = (candidate.evidence || []).slice(0, 3).map(item => item.message || item.code).filter(Boolean).join("; ");
     const email = candidate.email || "";
+    const selectionKey = email.toLowerCase() || (candidate.contact_id ? `apollo:${candidate.contact_id}` : "");
     const synced = candidate.hubspot_sync_status === "synced";
-    const checked = selectedCandidateEmails.has(email.toLowerCase()) ? "checked" : "";
+    const checked = selectedCandidateEmails.has(selectionKey) ? "checked" : "";
     const pending = !email || candidate.enrichment_status === "required";
     const context = candidate.google_context || {};
     const sources = (context.sources || []).filter(item => /^https?:\/\//i.test(item.url || ""));
     return `<tr>
-      <td><input class="candidate-select" type="checkbox" data-email="${escapeHtml(email)}" ${checked} ${pending ? "disabled" : ""} aria-label="Seleccionar ${escapeHtml(candidate.name || "prospecto")}"></td>
+      <td><input class="candidate-select" type="checkbox" data-key="${escapeHtml(selectionKey)}" ${checked} ${!selectionKey || synced ? "disabled" : ""} aria-label="Seleccionar ${escapeHtml(candidate.name || "prospecto")}"></td>
       <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "Email pendiente de enriquecimiento")}</span></td>
       <td>${escapeHtml(candidate.company || "")}<span class="candidate-meta">${escapeHtml(candidate.title || "")}</span></td>
       <td><span class="score">${escapeHtml(candidate.opportunity_score ?? candidate.icp_score ?? "-")}</span></td>
       <td>${escapeHtml(candidate.lifecycle_status || candidate.status || "candidate")}<span class="candidate-meta">${escapeHtml(candidate.approval_status || "")}</span></td>
       <td>${escapeHtml(evidence || candidate.recommendation || "Sin evidencia visible")}</td>
       <td class="google-context"><textarea readonly rows="6" aria-label="Contexto de Google para ${escapeHtml(candidate.company || "empresa")}">${escapeHtml(context.text || "Sin contexto de Google disponible.")}</textarea>${sources.map((item, index) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">[${index + 1}] ${escapeHtml(item.title || "Fuente")}</a>`).join("<br>")}<span class="candidate-meta">${context.checkedAt ? `Consultado: ${escapeHtml(context.checkedAt)}` : ""}</span></td>
-      <td>${pending ? "Pendiente de enriquecimiento. Sin consumo automatico de creditos Apollo." : synced ? "Listo para Engagement Prep" : "Seleccionar para HubSpot"}</td>
+      <td>${synced ? "Listo para Engagement Prep" : pending ? "Seleccionar para crear en HubSpot con identidad pendiente de enriquecimiento." : "Seleccionar para HubSpot"}</td>
     </tr>`;
   }).join("");
   document.querySelectorAll(".candidate-select").forEach(input => {
     input.onchange = event => {
-      const email = event.target.dataset.email.toLowerCase();
-      if (event.target.checked) selectedCandidateEmails.add(email);
-      else selectedCandidateEmails.delete(email);
+      const key = event.target.dataset.key;
+      if (event.target.checked) selectedCandidateEmails.add(key);
+      else selectedCandidateEmails.delete(key);
       renderCandidateSummary({ candidates: items, pagination: { total: items.length } });
     };
   });

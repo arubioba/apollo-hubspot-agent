@@ -139,9 +139,9 @@ export async function executeFinal(id, approvalCode, selectedEmails = []) {
   const alreadySynced = new Set([
     ...(run.testResults?.successful || []),
     ...(run.finalResults?.successful || [])
-  ].map(item => item.email?.toLowerCase()).filter(Boolean));
+  ].map(item => item.candidateKey || item.email?.toLowerCase()).filter(Boolean));
   const batch = selectedCandidates(run, selectedEmails)
-    .filter(candidate => !alreadySynced.has(candidate.email.toLowerCase()));
+    .filter(candidate => !alreadySynced.has(candidateKey(candidate)));
   if (!batch.length) throw new ValidationError("Selecciona candidatos pendientes antes de preparar la importacion.");
   const requested = batch.length;
   const dailyCount = await getDailyCount();
@@ -220,7 +220,7 @@ async function executeBatch(batch, countAgainstLimit, filters) {
       logger.info("hubspot.sync.started", "HubSpot candidate sync started.", { email: candidate.email });
       const result = await importCandidate(candidate, filters);
       successful.push(result);
-      if (!result.preview && result.contactId && filters.runId) {
+      if (!result.preview && result.contactId && filters.runId && candidate.email) {
         await markAraCandidateHubSpotSynced({
           tenantId: config.defaultTenantId,
           runId: filters.runId,
@@ -264,10 +264,14 @@ function uniqueByEmail(items) {
   return [...new Map(items.filter(x => x.email).map(x => [x.email.toLowerCase(), x])).values()];
 }
 
+function candidateKey(candidate) {
+  return candidate.email?.toLowerCase() || (candidate.apolloId ? `apollo:${candidate.apolloId}` : "");
+}
+
 function selectedCandidates(run, selectedEmails = []) {
-  const selected = new Set((selectedEmails || []).map(email => String(email).toLowerCase()).filter(Boolean));
+  const selected = new Set((selectedEmails || []).map(value => String(value).toLowerCase()).filter(Boolean));
   if (!selected.size) return [];
-  return run.candidates.filter(candidate => !candidate.discoveryOnly && candidate.email && selected.has(candidate.email.toLowerCase()));
+  return run.candidates.filter(candidate => candidateKey(candidate) && selected.has(candidateKey(candidate)));
 }
 
 function validateFilters(filters) {
