@@ -238,6 +238,16 @@ test("preview mode returns planned properties without calling fetch", async () =
   assert.equal(called, false);
 });
 
+test("preview mode accepts an Apollo identity without an email for operator-approved HubSpot import", async () => {
+  config.writeMode = "preview";
+  const prospect = { ...candidate(), email: null, emailVerified: false, apolloId: "apollo-identity-1", linkedin: "https://www.linkedin.com/in/prospect" };
+  const result = await importCandidate(prospect, filters());
+  assert.equal(result.preview, true);
+  assert.equal(result.email, null);
+  assert.equal(result.candidateKey, "apollo:apollo-identity-1");
+  assert.equal(result.contactProperties.hs_linkedin_url, "https://www.linkedin.com/in/prospect");
+});
+
 test("preview mode returns Engagement Prep notes without calling HubSpot", async () => {
   config.writeMode = "preview";
   let called = false;

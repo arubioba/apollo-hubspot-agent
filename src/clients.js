@@ -363,8 +363,8 @@ async function associate(contactId, companyId) {
 }
 
 export async function importCandidate(candidate, filters) {
-  if (!candidate.email || !candidate.company.domain) {
-    throw new ValidationError("Missing verified email or company domain");
+  if (!candidate.company.domain || !(candidate.email || candidate.linkedin || candidate.apolloId)) {
+    throw new ValidationError("Missing company domain or contact identity");
   }
   const araIncoming = araContactProperties(candidate, filters);
   const contactIncoming = {
@@ -378,7 +378,7 @@ export async function importCandidate(candidate, filters) {
   };
   if (isPreviewMode()) {
     logger.info("hubspot.preview.completed", "HubSpot candidate preview completed.", { email: candidate.email });
-    return { preview: true, email: candidate.email, contactProperties: contactIncoming, companyProperties: companyIncoming };
+    return { preview: true, email: candidate.email || null, candidateKey: candidate.email?.toLowerCase() || `apollo:${candidate.apolloId}`, contactProperties: contactIncoming, companyProperties: companyIncoming };
   }
   assertHubSpotWriteAllowed("hubspot.candidate.import", { email: candidate.email });
 
@@ -387,13 +387,17 @@ export async function importCandidate(candidate, filters) {
     ? await fillBlankProperties("companies", company.id, companyIncoming)
     : await createObject("companies", companyIncoming);
 
-  let contact = await searchOne("contacts", "email", candidate.email, ["email", "firstname", "lastname"]);
+  let contact = candidate.email
+    ? await searchOne("contacts", "email", candidate.email, ["email", "firstname", "lastname"])
+    : candidate.linkedin
+      ? await searchOne("contacts", "hs_linkedin_url", candidate.linkedin, ["email", "firstname", "lastname", "hs_linkedin_url"])
+      : null;
   contact = contact
     ? await fillBlankProperties("contacts", contact.id, contactIncoming)
     : await createObject("contacts", contactIncoming);
 
   await associate(contact.id, company.id);
-  return { contactId: contact.id, companyId: company.id, email: candidate.email };
+  return { contactId: contact.id, companyId: company.id, email: candidate.email || null, candidateKey: candidate.email?.toLowerCase() || `apollo:${candidate.apolloId}` };
 }
 
 export async function writeEngagementPrep(candidate, filters) {
