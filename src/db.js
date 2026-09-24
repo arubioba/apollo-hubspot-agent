@@ -7,8 +7,8 @@ export const pool = new Pool({
   ssl: config.databaseUrl?.includes("railway") ? { rejectUnauthorized: false } : undefined
 });
 
-export async function initDb() {
-  await pool.query(`
+export async function initDb(client = pool) {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS import_runs (
       id uuid PRIMARY KEY,
       created_at timestamptz NOT NULL DEFAULT now(),
@@ -73,6 +73,10 @@ export async function initDb() {
       UNIQUE (tenant_id, professional_email, campaign_id)
     );
     ALTER TABLE import_runs ADD COLUMN IF NOT EXISTS correlation_id text;
+    ALTER TABLE ara_candidates ALTER COLUMN professional_email DROP NOT NULL;
+    ALTER TABLE ara_candidates ADD COLUMN IF NOT EXISTS google_context jsonb NOT NULL DEFAULT '{}'::jsonb;
+    CREATE UNIQUE INDEX IF NOT EXISTS ara_candidates_discovery_identity_idx
+      ON ara_candidates(tenant_id, apollo_person_id, campaign_id) WHERE professional_email IS NULL;
     CREATE INDEX IF NOT EXISTS ara_candidates_tenant_status_idx
       ON ara_candidates(tenant_id, lifecycle_status, approval_status);
     CREATE INDEX IF NOT EXISTS ara_candidates_run_idx

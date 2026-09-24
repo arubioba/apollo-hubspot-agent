@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { config } from "./config.js";
-import { ensureHubSpotProperties, findApolloCandidates, importCandidate, writeEngagementPrep } from "./clients.js";
+import { ensureHubSpotProperties, discoverApolloProspects, importCandidate, writeEngagementPrep } from "./clients.js";
 import { interpretFilters } from "./interpreter.js";
 import { getDailyCount, incrementDailyCount, loadRun, pool, saveRun } from "./db.js";
 import { getCorrelationId } from "./context.js";
@@ -72,13 +72,9 @@ function buildSafeRelaxation(interpretation) {
 
 export async function approveRoles(id) {
   const run = await requiredRun(id);
-  const candidates = [];
-  for (let page = 1; page <= 5 && candidates.length < run.filters.quantity + config.testBatchSize; page++) {
-    logger.info("apollo.search.started", "Apollo candidate search started.", { runId: run.id, page });
-    candidates.push(...await findApolloCandidates(run.filters, page));
-    logger.info("apollo.search.completed", "Apollo candidate search completed.", { runId: run.id, page, candidateCount: candidates.length });
-  }
-  run.candidates = uniqueByEmail(candidates).slice(0, run.filters.quantity + config.testBatchSize);
+  const discovery = await discoverApolloProspects(run.filters);
+  run.candidates = discovery.candidates;
+  run.filters.discoveryStats = discovery.stats;
   const araCandidates = run.candidates.map(candidate => toAraCandidate(candidate, {
     tenantId: config.defaultTenantId,
     campaignId: run.id,
@@ -93,8 +89,8 @@ export async function approveRoles(id) {
     run,
     araCandidates: savedAraCandidates,
     message: run.candidates.length
-      ? `Encontre ${run.candidates.length} candidatos elegibles. La prueba usara los primeros ${Math.min(config.testBatchSize, run.candidates.length)}.`
-      : "No encontre candidatos. Revisa la propuesta para relajar filtros antes de volver a buscar.",
+      ? `Encontre ${run.candidates.length} prospectos tras excluir registros de Apollo y HubSpot. La busqueda no revela email ni telefono ni ejecuta enriquecimiento de pago.${discovery.stats.truncated ? " Se alcanzo el limite de consultas; los resultados son parciales." : ""}`
+      : `No encontre prospectos nuevos con estos filtros.${discovery.stats.truncated ? " Se alcanzo el limite de consultas; la busqueda es parcial." : ""}`,
     relaxationProposal: run.candidates.length ? null : run.filters.interpretation.relaxation
   };
 }
@@ -261,7 +257,7 @@ function uniqueByEmail(items) {
 function selectedCandidates(run, selectedEmails = []) {
   const selected = new Set((selectedEmails || []).map(email => String(email).toLowerCase()).filter(Boolean));
   if (!selected.size) return [];
-  return run.candidates.filter(candidate => selected.has(candidate.email?.toLowerCase()));
+  return run.candidates.filter(candidate => !candidate.discoveryOnly && candidate.email && selected.has(candidate.email.toLowerCase()));
 }
 
 function validateFilters(filters) {
@@ -269,7 +265,7 @@ function validateFilters(filters) {
   if (!filters.employeeMin || !filters.employeeMax || filters.employeeMin > filters.employeeMax) throw new ValidationError("Define un rango valido de empleados.");
   if (!Array.isArray(filters.countries) || !filters.countries.length) throw new ValidationError("Selecciona al menos un pais.");
   if (!Array.isArray(filters.roles) || !filters.roles.length || filters.roles.length > 3) throw new ValidationError("Selecciona entre uno y tres roles.");
-  if (!Number.isInteger(filters.quantity) || filters.quantity < 1) throw new ValidationError("La cantidad debe ser mayor que cero.");
+  if (!Number.isInteger(filters.quantity) || filters.quantity < 1 || filters.quantity > 100) throw new ValidationError("La cantidad debe estar entre 1 y 100 prospectos por busqueda.");
 }
 
 async function requiredRun(id) {

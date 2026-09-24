@@ -52,7 +52,8 @@ export async function upsertAraCandidate(candidate, client = pool) {
     candidate.agentVersion,
     candidate.scoringVersion,
     candidate.rejectionReason,
-    candidate.correlationId
+    candidate.correlationId,
+    JSON.stringify(candidate.googleContext || {})
   ];
   const result = await client.query(`
     INSERT INTO ara_candidates (
@@ -62,14 +63,14 @@ export async function upsertAraCandidate(candidate, client = pool) {
       company_icp_score, contact_relevance_score, opportunity_score, confidence, recommendation,
       positive_factors, negative_factors, commercial_signals, evidence, lifecycle_status,
       approval_status, hubspot_sync_status, enrichment_status, context_status, engagement_status,
-      next_action, assigned_owner, agent_version, scoring_version, rejection_reason, correlation_id
+      next_action, assigned_owner, agent_version, scoring_version, rejection_reason, correlation_id, google_context
     )
     VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
       $21,$22,$23,$24,$25,$26::jsonb,$27::jsonb,$28::jsonb,$29::jsonb,$30,
-      $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41
+      $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42::jsonb
     )
-    ON CONFLICT (tenant_id, professional_email, campaign_id) DO UPDATE SET
+    ON CONFLICT ${candidate.professionalEmail ? "(tenant_id, professional_email, campaign_id)" : "(tenant_id, apollo_person_id, campaign_id) WHERE professional_email IS NULL"} DO UPDATE SET
       apollo_person_id = COALESCE(ara_candidates.apollo_person_id, EXCLUDED.apollo_person_id),
       apollo_organization_id = COALESCE(ara_candidates.apollo_organization_id, EXCLUDED.apollo_organization_id),
       contact_name = EXCLUDED.contact_name,
@@ -91,6 +92,9 @@ export async function upsertAraCandidate(candidate, client = pool) {
       negative_factors = EXCLUDED.negative_factors,
       commercial_signals = EXCLUDED.commercial_signals,
       evidence = EXCLUDED.evidence,
+      google_context = EXCLUDED.google_context,
+      context_status = EXCLUDED.context_status,
+      enrichment_status = EXCLUDED.enrichment_status,
       lifecycle_status = CASE
         WHEN ara_candidates.lifecycle_status IN ('APPROVED', 'HUBSPOT_SYNC_PENDING', 'HUBSPOT_SYNCED')
           THEN ara_candidates.lifecycle_status
@@ -185,6 +189,8 @@ export function toPublicCandidate(row) {
     title: row.job_title,
     email: row.professional_email,
     linkedin_url: row.linkedin_url,
+    google_context: row.google_context || {},
+    enrichment_status: row.enrichment_status,
     company_icp_score: numberOrNull(row.company_icp_score),
     contact_relevance_score: numberOrNull(row.contact_relevance_score),
     opportunity_score: numberOrNull(row.opportunity_score),

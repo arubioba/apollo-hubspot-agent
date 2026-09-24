@@ -3,9 +3,26 @@ import { ApolloError, ApolloRateLimitError, HubSpotError, ValidationError } from
 import { logger } from "./logger.js";
 import { assertHubSpotWriteAllowed, isPreviewMode } from "./write-guard.js";
 import { getAraKnowledgeProfile } from "./ara-knowledge.js";
+import { discoverProspects } from "./prospect-discovery.js";
+import { researchGoogleContext } from "./google-context.js";
+
+export async function discoverApolloProspects(filters) {
+  if (config.externalServicesMode === "mock") {
+    const candidates = mockApolloCandidates(filters).slice(0, filters.quantity);
+    for (const candidate of candidates) candidate.googleContext = { status: "mock", text: "Contexto simulado; no se consulto Google.", sources: [] };
+    return { candidates, stats: { mode: "mock" } };
+  }
+  const result = await discoverProspects(filters, {
+    apollo, hubspot, normalizeCandidate,
+    acceptCandidate: candidate => !companyMatchesExcludedKeywords(candidate, filters.interpretation?.excludedCompanyKeywords || []) && !companyLooksLikeAdjacentProvider(candidate, filters),
+    context: candidate => researchGoogleContext(candidate, { apiKey: config.serperKey })
+  });
+  logger.info("apollo.discovery.completed", "Global discovery and saved-record exclusions completed.", { ...result.stats, accepted: result.candidates.length });
+  return result;
+}
 
 async function request(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000), ...options });
   const text = await response.text();
   const body = text ? JSON.parse(text) : {};
   if (!response.ok) throw new Error(`${response.status} ${body.message || body.error || text}`);
@@ -222,6 +239,7 @@ export function normalizeCandidate(person) {
     country: person.country || "",
     validPhones: phones.filter(p => p.status === "valid_number" || p.sanitized_number),
     company: {
+      apolloId: organization.id || person.organization_id || null,
       name: organization.name || person.organization_name || "",
       domain: organization.primary_domain || organization.domain || "",
       website: organization.website_url || "",

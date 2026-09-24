@@ -90,6 +90,8 @@ th { color: #60746a; font-size: 12px; text-transform: uppercase; letter-spacing:
 .table-wrap { overflow-x: auto; }
 .empty { color: #738278; font-style: italic; }
 .candidate-name { font-weight: 900; color: #10231d; }
+.google-context { min-width: 300px; max-width: 440px; }
+.google-context textarea { width: 100%; min-height: 140px; resize: vertical; font: inherit; }
 .candidate-meta { display: block; color: #6b7b72; margin-top: 4px; }
 .score { display: inline-flex; min-width: 42px; justify-content: center; padding: 6px 8px; border-radius: 10px; background: var(--slate); color: #fff; font-weight: 900; }
 .feed, .report { min-height: 180px; display: grid; gap: 10px; align-content: start; margin-top: 14px; }
