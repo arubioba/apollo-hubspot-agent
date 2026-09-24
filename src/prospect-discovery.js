@@ -84,6 +84,49 @@ export async function loadSavedRecords({ apollo, hubspot }) {
   return index;
 }
 
+// Apollo People Search is already a net-new search: Apollo does not return a
+// person saved in the team's contacts. Scanning every saved Apollo contact first
+// is therefore redundant, slow, and subject to Apollo's saved-record limits.
+// HubSpot is checked only for each candidate returned by that search.
+async function existsInHubSpot(person, organization, hubspot) {
+  const searches = [];
+  const companyDomain = normalizeDomain(organization.primary_domain || organization.domain || organization.website_url);
+  if (companyDomain) searches.push(hubspot("/crm/v3/objects/companies/search", {
+    method: "POST",
+    body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "domain", operator: "EQ", value: companyDomain }] }], properties: ["domain"], limit: 1 })
+  }));
+  const linkedin = person.linkedin_url;
+  if (linkedin) searches.push(hubspot("/crm/v3/objects/contacts/search", {
+    method: "POST",
+    body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "hs_linkedin_url", operator: "EQ", value: linkedin }] }], properties: ["hs_linkedin_url"], limit: 1 })
+  }));
+  const email = person.email;
+  if (email) searches.push(hubspot("/crm/v3/objects/contacts/search", {
+    method: "POST",
+    body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: email }] }], properties: ["email"], limit: 1 })
+  }));
+  const responses = await Promise.all(searches);
+  return responses.some(response => Array.isArray(response.results) && response.results.length > 0);
+}
+
+function sameOrganization(candidate, saved) {
+  const candidateDomain = normalizeDomain(candidate.primary_domain || candidate.domain || candidate.website_url);
+  const savedDomain = normalizeDomain(saved.primary_domain || saved.domain || saved.website_url || saved.website);
+  return Boolean((candidateDomain && candidateDomain === savedDomain)
+    || (candidate.name && saved.name && norm(candidate.name) === norm(saved.name)));
+}
+
+// People Search excludes saved Apollo contacts by design. Apollo accounts are a
+// different saved-record collection, so verify only the companies that Apollo
+// actually returned instead of enumerating the entire collection before a run.
+async function existsInApolloAccounts(organization, apollo) {
+  const query = normalizeDomain(organization.primary_domain || organization.domain || organization.website_url) || organization.name;
+  if (!query) return false;
+  const response = await apollo("/accounts/search", { q_keywords: query, page: 1, per_page: 100 });
+  if (!Array.isArray(response.accounts)) throw new Error("No se pudo comprobar las empresas guardadas en Apollo.");
+  return response.accounts.some(account => sameOrganization(organization, account) || sameOrganization(organization, account.organization || {}));
+}
+
 export function savedCompany(org, index) {
   return Boolean(index.organizationIds.has(String(org.id || ""))
     || [org.primary_domain, org.domain, org.website_url].some(value => index.domains.has(normalizeDomain(value)))
@@ -114,12 +157,7 @@ export function peoplePayload(filters, industry, page, savedDomains = []) {
 }
 
 export async function discoverProspects(filters, { apollo, hubspot, normalizeCandidate, context, acceptCandidate = () => true, maxRequests = 60 }) {
-  let saved;
-  try { saved = await loadSavedRecords({ apollo, hubspot }); }
-  catch (cause) {
-    throw new AppError("No se pudo completar la exclusion de registros guardados en Apollo y HubSpot. Revisa permisos, disponibilidad y limites de lectura antes de repetir.", { code: "EXCLUSION_CHECK_FAILED", status: 503, cause });
-  }
-  const stats = { saved: saved.counts, organizationsReceived: 0, companiesExcluded: 0, peopleReceived: 0, contactsExcluded: 0, requests: 0, truncated: false };
+  const stats = { saved: { apollo: "Apollo People Search excludes saved contacts", hubspot: "candidate-level verification" }, organizationsReceived: 0, companiesExcluded: 0, peopleReceived: 0, contactsExcluded: 0, requests: 0, truncated: false };
   const people = new Map();
   const terms = [...new Set(filters.interpretation?.industryKeywords?.length ? filters.interpretation.industryKeywords : [filters.industry])];
   const target = Math.min(100, filters.quantity);
@@ -127,14 +165,22 @@ export async function discoverProspects(filters, { apollo, hubspot, normalizeCan
     for (let page = 1; page <= 500; page++) {
       if (stats.requests >= maxRequests) { stats.truncated = true; break outer; }
       stats.requests++;
-        const result = await apollo("/mixed_people/api_search", peoplePayload(filters, term, page, [...saved.domains].slice(0, 1000)));
+        const result = await apollo("/mixed_people/api_search", peoplePayload(filters, term, page));
         if (!Array.isArray(result.people)) throw new Error("Respuesta de prospectos de Apollo no reconocida.");
         stats.peopleReceived += result.people.length;
         for (const person of result.people) {
           const org = person.organization;
           if (!person.id || !org?.name) { stats.contactsExcluded++; continue; }
-          if (savedCompany(org, saved)) { stats.companiesExcluded++; continue; }
-          if (savedPerson(person, saved)) { stats.contactsExcluded++; continue; }
+          if (person.is_saved || person.contact_id) { stats.contactsExcluded++; continue; }
+          try {
+            const [savedApolloAccount, savedHubSpotRecord] = await Promise.all([
+              existsInApolloAccounts(org, apollo),
+              existsInHubSpot(person, org, hubspot)
+            ]);
+            if (savedApolloAccount || savedHubSpotRecord) { stats.companiesExcluded++; continue; }
+          } catch (cause) {
+            throw new AppError("No se pudo verificar este candidato contra HubSpot. No se publicaran resultados sin comprobar.", { code: "EXCLUSION_CHECK_FAILED", status: 503, cause });
+          }
           if ((filters.interpretation?.excludedTitles || []).some(title => norm(person.title).includes(norm(title)))) continue;
           const candidate = normalizeCandidate({ ...person, organization: org });
           if (!acceptCandidate(candidate)) { stats.contactsExcluded++; continue; }

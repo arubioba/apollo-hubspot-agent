@@ -7,18 +7,19 @@ import { researchGoogleContext } from "../src/google-context.js";
 const filters = { industry: "Pharma", countries: ["Francia"], employeeMin: 50, employeeMax: 5000, roles: ["CIO"], quantity: 3, interpretation: { industryKeywords: ["Pharmaceuticals"], roleTitles: ["CIO"], seniorities: ["CXO"], contactLocations: ["UK"], excludedTitles: ["Assistant"] } };
 const person = (id, name, extra = {}) => ({ id, first_name: "Jean", last_name_obfuscated: "D***", title: "CIO", organization: { id: `org-${id}`, name, primary_domain: `${id}.example` }, ...extra });
 
-test("global discovery excludes Apollo/HubSpot contacts and companies before Serper, and keeps email-free previews", async () => {
+test("global discovery checks only returned candidates against saved Apollo and HubSpot records", async () => {
   const calls = [], researched = [];
   const apollo = async (path, body) => {
     calls.push({ path, body });
-    if (path === "/contacts/search") return { contacts: [{ person_id: "saved-person" }], pagination: { total_entries: 1 } };
-    if (path === "/accounts/search") return { accounts: [{ name: "Saved Apollo", domain: "saved-apollo.example" }], pagination: { total_entries: 1 } };
+    if (path === "/accounts/search") return { accounts: body.q_keywords === "saved-apollo.example" ? [{ name: "Saved Apollo", domain: "saved-apollo.example" }] : [] };
     assert.equal(path, "/mixed_people/api_search");
-    return { total_entries: 7, people: [person("saved-person", "Different"), person("saved-apollo", "Saved Apollo"), person("saved-hs", "Saved HS"), person("email-company", "Email Company"), person("new", "New Pharma"), person("new", "New Pharma"), person("assistant", "New Other", { title: "Assistant CIO" })] };
+    return { total_entries: 7, people: [person("saved-person", "Different", { is_saved: true }), person("saved-apollo", "Saved Apollo"), person("saved-hs", "Saved HS"), person("saved-contact", "New Contact", { linkedin_url: "https://linkedin.com/in/saved" }), person("new", "New Pharma", { linkedin_url: "https://linkedin.com/in/new" }), person("new", "New Pharma"), person("assistant", "New Other", { title: "Assistant CIO" })] };
   };
-  const hubspot = async path => path.includes("/companies?")
-    ? { results: [{ properties: { name: "Saved HS", domain: "https://www.saved-hs.example/" } }] }
-    : { results: [{ properties: { email: "someone@email-company.example" } }] };
+  const hubspot = async (path, options) => {
+    const filter = JSON.parse(options.body).filterGroups[0].filters[0];
+    if (path.includes("companies/search")) return { results: filter.value === "saved-hs.example" ? [{ id: "1" }] : [] };
+    return { results: filter.value === "https://linkedin.com/in/saved" ? [{ id: "2" }] : [] };
+  };
   const result = await discoverProspects(filters, { apollo, hubspot, normalizeCandidate, context: async candidate => { researched.push(candidate.apolloId); return { status: "available", text: "Source-based context", sources: [] }; } });
   assert.deepEqual(result.candidates.map(c => c.apolloId), ["new"]);
   assert.deepEqual(researched, ["new"]);
@@ -33,8 +34,9 @@ test("global discovery excludes Apollo/HubSpot contacts and companies before Ser
   assert.deepEqual(search.person_seniorities, ["c_suite"]);
   assert.equal(search.include_similar_titles, false);
   assert.equal(search.q_keywords, "Pharmaceuticals");
-  assert.ok(search.not_organization_websites_list.includes("saved-hs.example"));
-  assert.ok(!calls.some(call => /match|enrich|mixed_companies/.test(call.path)));
+  assert.equal(search.not_organization_websites_list, undefined);
+  assert.ok(!calls.some(call => call.path === "/contacts/search"));
+  assert.equal(calls.filter(call => call.path === "/accounts/search").length, 6);
 });
 
 test("exclusion lookup follows every Apollo and HubSpot page, normalizes domains, and uses contact IDs", async () => {
@@ -60,12 +62,12 @@ test("exclusion lookup follows every Apollo and HubSpot page, normalizes domains
 test("failed or incomplete exclusion never falls back to unfiltered discovery", async () => {
   let discoveryCalls = 0;
   const apollo = async path => {
-    if (path === "/contacts/search") return { contacts: [], pagination: { total_entries: 50001 } };
+    if (path === "/accounts/search") return { accounts: [] };
     discoveryCalls++;
-    return {};
+    return { people: [person("candidate", "Candidate")] };
   };
   await assert.rejects(discoverProspects(filters, { apollo, hubspot: async () => { throw new Error("403"); }, normalizeCandidate, context: async () => ({}) }), error => error.code === "EXCLUSION_CHECK_FAILED");
-  assert.equal(discoveryCalls, 0);
+  assert.equal(discoveryCalls, 1);
   await assert.rejects(loadSavedRecords({ apollo: async path => ({ [path.includes("contacts") ? "contacts" : "accounts"]: [] }), hubspot: async () => { throw new Error("403"); } }), /403/);
 });
 
