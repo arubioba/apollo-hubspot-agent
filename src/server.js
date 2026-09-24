@@ -1,6 +1,6 @@
 import { config, validateConfig } from "./config.js";
 import { createApp } from "./app.js";
-import { analyzeFilters, applyRelaxation, approveRoles, configureRun, executeFinal, executeTest, prepareEngagement, startRun } from "./agent.js";
+import { analyzeFilters, applyRelaxation, approveRoles, configureRun, executeFinal, executeTest, prepareEngagement, startRun, startDiscovery, discoveryStatus } from "./agent.js";
 import { ensureHubSpotProperties, verifyHubSpotConnection } from "./clients.js";
 import { verifyOpenAIConnection } from "./interpreter.js";
 import { closeDb, getLatestSuccessfulRun, initDb } from "./db.js";
@@ -21,6 +21,8 @@ const handlers = {
   configureRun,
   analyzeFilters,
   approveRoles,
+  startDiscovery,
+  discoveryStatus,
   applyRelaxation,
   executeTest,
   executeFinal,
