@@ -60,6 +60,8 @@ export function serializeRunCandidates(run, { page = 1, pageSize = 25 } = {}) {
         title: candidate.title || null,
         email: candidate.email || null,
         linkedin_url: candidate.linkedin || null,
+        google_context: candidate.googleContext || {},
+        enrichment_status: candidate.discoveryOnly ? "required" : "not_started",
         icp_score: candidate.icpScore ?? null,
         contact_relevance_score: candidate.contactScore ?? null,
         status: failure ? "failed" : success ? "synced" : "candidate",

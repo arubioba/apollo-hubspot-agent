@@ -41,12 +41,14 @@ export async function interpretFilters(input) {
       instructions: [
         "You translate a B2B ICP into Apollo-compatible search terms.",
         "Expand one industry into close Apollo taxonomy synonyms, always including the canonical English industry terms plus useful Spanish equivalents, not unrelated adjacent markets.",
-        "Expand each selected role into Spanish and English title variants; roles are OR alternatives.",
+        "Expand each selected role only into equivalent titles, not lower or adjacent roles; roles are OR alternatives. If the brief says no other roles, preserve that restriction.",
         "Use the free-text brief to propose useful company keywords as non-filtering context, plus contact locations, explicit company/technology exclusions, explicit title exclusions and seniorities.",
         "If the user says companies should not have or should not use a technology, put that technology in excludedCompanyKeywords, not in companyKeywords and not in excludedTitles.",
         "excludedTitles is only for contact job titles or roles to avoid, never for products, CRMs, technologies, industries, or company attributes.",
         "Company keywords are signals to document and prioritize, never mandatory Apollo search filters.",
-        "Do not loosen mandatory verified email, valid phone, company domain, countries, or employee range.",
+        "Countries are employer headquarters; contactLocations are only explicit personal locations from the brief. Never replace employer countries with contact locations.",
+        "Discovery uses People API Search with q_keywords for industry terms, not a verified industry taxonomy. It returns previews, not email or phone. Never claim a valid phone, LinkedIn profile, verified identity, or full industry match has been checked. No paid enrichment is performed.",
+        "seniorities must use only Apollo values: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern.",
         "When optional company keywords or contact locations might overconstrain results, recommend removing them first in relaxation. Return concise Spanish explanation."
       ].join(" "),
       input: JSON.stringify(input),

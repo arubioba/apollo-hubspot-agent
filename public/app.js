@@ -82,7 +82,11 @@ function bindEvents() {
     form.scrollIntoView({ behavior: "smooth", block: "start" });
     addFeed("Revenue Orchestrator", "Filtros desbloqueados. Ajusta el ICP y vuelve a interpretar.");
   };
-  actions.approveSearch.onclick = () => search().catch(showError);
+  actions.approveSearch.onclick = async () => {
+    actions.approveSearch.disabled = true;
+    try { await search(); } catch (error) { showError(error); }
+    finally { actions.approveSearch.disabled = false; }
+  };
   actions.preview.onclick = () => preview().catch(showError);
   actions.import.onclick = () => finalImport().catch(showError);
   document.querySelector('[data-agent="engagement"]').onclick = () => engagementPrep().catch(showError);
@@ -117,10 +121,11 @@ async function search() {
   await ensureRun();
   setSystem("Searching", "Discovery Agent esta consultando Apollo.");
   renderTimeline("data", ["orchestrator", "discovery"]);
-  addFeed("Discovery Agent", "Busqueda aprobada. Ejecutando Apollo con email verificado, telefono valido y dominio de empresa.");
+  addFeed("Discovery Agent", "Buscando en la base global de Apollo. Excluyendo contactos y empresas guardados en Apollo y HubSpot; consultando contexto de Google. No se ejecutara enriquecimiento de pago.");
   const data = await call(`/api/runs/${run.id}/approve-roles`);
   run = data.run;
   $("#phase-pill").textContent = readablePhase(run.phase);
+  addFeed("Discovery Agent", data.message);
   if (!run.candidates.length) {
     renderTimeline("discovery", ["orchestrator"]);
     addFeed("Discovery Agent", `No encontre candidatos elegibles.\n${data.relaxationProposal?.explanation || "Sugiero relajar filtros opcionales."}`);
@@ -130,8 +135,7 @@ async function search() {
   }
   addFeed("Data Intelligence", `Normalice ${run.candidates.length} candidatos y los guarde en Candidate Inbox.`);
   await loadCandidates();
-  actions.preview.disabled = false;
-  actions.import.disabled = false;
+  updateCandidateActionButtons();
   renderTimeline("hubspot", ["orchestrator", "discovery", "data", "account"]);
   setSystem("Candidates ready", "Revisa candidatos antes de sincronizar.");
 }
@@ -182,8 +186,8 @@ async function engagementPrep() {
 
 async function loadCandidates(resetSelection = true) {
   await ensureRun();
-  let data = await call(`/api/candidates?run_id=${encodeURIComponent(run.id)}&page_size=25`, {}, "GET");
-  if (!data.candidates?.length) data = await call(`/api/import-runs/${run.id}/candidates?page_size=25`, {}, "GET");
+  let data = await call(`/api/candidates?run_id=${encodeURIComponent(run.id)}&page_size=100`, {}, "GET");
+  if (!data.candidates?.length) data = await call(`/api/import-runs/${run.id}/candidates?page_size=100`, {}, "GET");
   if (resetSelection) setDefaultCandidateSelection(data.candidates || []);
   renderCandidateSummary(data);
   renderCandidates(data.candidates || []);
@@ -261,14 +265,18 @@ function renderCandidates(items) {
     const email = candidate.email || "";
     const synced = candidate.hubspot_sync_status === "synced";
     const checked = selectedCandidateEmails.has(email.toLowerCase()) ? "checked" : "";
+    const pending = !email || candidate.enrichment_status === "required";
+    const context = candidate.google_context || {};
+    const sources = (context.sources || []).filter(item => /^https?:\/\//i.test(item.url || ""));
     return `<tr>
-      <td><input class="candidate-select" type="checkbox" data-email="${escapeHtml(email)}" ${checked}></td>
-      <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "")}</span></td>
+      <td><input class="candidate-select" type="checkbox" data-email="${escapeHtml(email)}" ${checked} ${pending ? "disabled" : ""} aria-label="Seleccionar ${escapeHtml(candidate.name || "prospecto")}"></td>
+      <td><span class="candidate-name">${escapeHtml(candidate.name || "Sin nombre")}</span><span class="candidate-meta">${escapeHtml(candidate.email || "Email pendiente de enriquecimiento")}</span></td>
       <td>${escapeHtml(candidate.company || "")}<span class="candidate-meta">${escapeHtml(candidate.title || "")}</span></td>
       <td><span class="score">${escapeHtml(candidate.opportunity_score ?? candidate.icp_score ?? "-")}</span></td>
       <td>${escapeHtml(candidate.lifecycle_status || candidate.status || "candidate")}<span class="candidate-meta">${escapeHtml(candidate.approval_status || "")}</span></td>
       <td>${escapeHtml(evidence || candidate.recommendation || "Sin evidencia visible")}</td>
-      <td>${synced ? "Listo para Engagement Prep" : "Seleccionar para HubSpot"}</td>
+      <td class="google-context"><textarea readonly rows="6" aria-label="Contexto de Google para ${escapeHtml(candidate.company || "empresa")}">${escapeHtml(context.text || "Sin contexto de Google disponible.")}</textarea>${sources.map((item, index) => `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">[${index + 1}] ${escapeHtml(item.title || "Fuente")}</a>`).join("<br>")}<span class="candidate-meta">${context.checkedAt ? `Consultado: ${escapeHtml(context.checkedAt)}` : ""}</span></td>
+      <td>${pending ? "Pendiente de enriquecimiento. Sin consumo automatico de creditos Apollo." : synced ? "Listo para Engagement Prep" : "Seleccionar para HubSpot"}</td>
     </tr>`;
   }).join("");
   document.querySelectorAll(".candidate-select").forEach(input => {
@@ -445,7 +453,7 @@ function metric(label, value) {
 }
 
 function emptyRow(message) {
-  return `<tr><td colspan="7" class="empty">${escapeHtml(message)}</td></tr>`;
+  return `<tr><td colspan="8" class="empty">${escapeHtml(message)}</td></tr>`;
 }
 
 function setSystem(state, detail) {

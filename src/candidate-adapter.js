@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 export function toAraCandidate(candidate, { tenantId, campaignId, runId, correlationId, filters = {} }) {
-  const name = [candidate.firstName, candidate.lastName].filter(Boolean).join(" ").trim() || candidate.email;
+  const name = [candidate.firstName, candidate.lastName].filter(Boolean).join(" ").trim() || candidate.email || "Identidad pendiente";
   const evidence = buildEvidence(candidate, filters);
   const scores = scoreCandidate(candidate, filters);
   const recommended = scores.opportunityScore >= 75 && scores.industryMatch && scores.titleMatch;
@@ -24,7 +24,8 @@ export function toAraCandidate(candidate, { tenantId, campaignId, runId, correla
     country: candidate.company?.country || candidate.country || "",
     industry: filters.industry || "",
     employeeRange: filters.employeeMin && filters.employeeMax ? `${filters.employeeMin}-${filters.employeeMax}` : "",
-    professionalEmail: candidate.email,
+    professionalEmail: candidate.email || null,
+    googleContext: candidate.googleContext || {},
     linkedinUrl: candidate.linkedin || "",
     companyIcpScore: scores.companyIcpScore,
     contactRelevanceScore: scores.contactRelevanceScore,
@@ -38,10 +39,10 @@ export function toAraCandidate(candidate, { tenantId, campaignId, runId, correla
     lifecycleStatus: recommended ? "RECOMMENDED" : "HUMAN_REVIEW_REQUIRED",
     approvalStatus: "PENDING",
     hubspotSyncStatus: "pending",
-    enrichmentStatus: "not_started",
-    contextStatus: "not_started",
+    enrichmentStatus: candidate.discoveryOnly ? "required" : "not_started",
+    contextStatus: candidate.googleContext?.status || "not_started",
     engagementStatus: "not_started",
-    nextAction: "commercial_approval",
+    nextAction: candidate.discoveryOnly ? "enrichment_required" : "commercial_approval",
     assignedOwner: null,
     agentVersion: "discovery-0.1",
     scoringVersion: "heuristic-0.1",
@@ -78,6 +79,8 @@ function scoreCandidate(candidate, filters) {
 function buildEvidence(candidate, filters) {
   const industryMatch = matchesRequestedIndustry(candidate, filters);
   return [
+    candidate.discoveryOnly && evidence("discovery_preview", "Prospecto de la base global. Email, telefono e identidad completa pendientes de enriquecimiento; no se consumieron creditos de enriquecimiento.", "negative"),
+    candidate.discoveryOnly && (filters.interpretation?.excludedCompanyKeywords || []).length > 0 && evidence("technology_exclusion_partial", "Exclusiones de tecnologia comprobadas solo sobre los datos disponibles; ausencia de informacion no demuestra que la empresa no utilice esas tecnologias.", "negative"),
     candidate.emailVerified && evidence("verified_email", "Email laboral verificado.", "positive"),
     candidate.company?.domain && evidence("company_domain_available", "Dominio de empresa disponible.", "positive"),
     candidate.validPhones?.length && evidence("valid_phone_available", "Contacto tiene telefono valido.", "positive"),
