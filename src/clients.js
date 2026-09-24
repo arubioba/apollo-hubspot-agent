@@ -4,7 +4,6 @@ import { logger } from "./logger.js";
 import { assertHubSpotWriteAllowed, isPreviewMode } from "./write-guard.js";
 import { getAraKnowledgeProfile } from "./ara-knowledge.js";
 import { discoverProspects } from "./prospect-discovery.js";
-import { researchGoogleContext } from "./google-context.js";
 
 export async function discoverApolloProspects(filters) {
   if (config.externalServicesMode === "mock") {
@@ -15,7 +14,9 @@ export async function discoverApolloProspects(filters) {
   const result = await discoverProspects(filters, {
     apollo, hubspot, normalizeCandidate,
     acceptCandidate: candidate => !companyMatchesExcludedKeywords(candidate, filters.interpretation?.excludedCompanyKeywords || []) && !companyLooksLikeAdjacentProvider(candidate, filters),
-    context: candidate => researchGoogleContext(candidate, { apiKey: config.serperKey })
+    // Google snippets are hidden until their relevance can be validated. They
+    // are not copied into HubSpot notes or ICP properties.
+    context: async () => ({ status: "disabled", text: "", sources: [] })
   });
   logger.info("apollo.discovery.completed", "Global discovery and saved-record exclusions completed.", { ...result.stats, accepted: result.candidates.length });
   return result;
@@ -363,8 +364,8 @@ async function associate(contactId, companyId) {
 }
 
 export async function importCandidate(candidate, filters) {
-  if (!candidate.company.domain || !(candidate.email || candidate.linkedin || candidate.apolloId)) {
-    throw new ValidationError("Missing company domain or contact identity");
+  if (!candidate.company?.name || !(candidate.email || candidate.linkedin || candidate.apolloId)) {
+    throw new ValidationError("Missing company name or contact identity");
   }
   const araIncoming = araContactProperties(candidate, filters);
   const contactIncoming = {
@@ -382,7 +383,9 @@ export async function importCandidate(candidate, filters) {
   }
   assertHubSpotWriteAllowed("hubspot.candidate.import", { email: candidate.email });
 
-  let company = await searchOne("companies", "domain", candidate.company.domain, ["domain", "name"]);
+  let company = candidate.company.domain
+    ? await searchOne("companies", "domain", candidate.company.domain, ["domain", "name"])
+    : await searchOne("companies", "name", candidate.company.name, ["domain", "name"]);
   company = company
     ? await fillBlankProperties("companies", company.id, companyIncoming)
     : await createObject("companies", companyIncoming);
